@@ -1,12 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
   <title>Chainlight</title>
-  <desc>Two glowing links on a dark rounded tile.</desc>
-  <rect x="2" y="2" width="60" height="60" rx="15" fill="#171b25"/>
-  <circle cx="32" cy="33" r="24" fill="#f7931a" opacity=".08"/>
-  <g fill="none" stroke="#f7931a" stroke-width="5" transform="rotate(-40 32 33)">
-    <rect x="11" y="25" width="27" height="16" rx="8"/>
-    <rect x="26" y="25" width="27" height="16" rx="8"/>
-  </g>
-  <path d="M27 38l10-9" stroke="#fff2cc" stroke-width="4" stroke-linecap="round"/>
-  <path d="M48 9v7m-3.5-3.5h7" fill="none" stroke="#fff2cc" stroke-width="2" stroke-linecap="round"/>
+  <desc>Two pixel chain links in blue and green joined by an amber spark, on a dark rounded tile.</desc>
+  <rect x="2" y="2" width="60" height="60" rx="12" fill="#171b28"/>
+  <path d="M14 12H34V16H38V32H34V36H14V32H10V16H14Z M18 20V28H30V20Z" fill="#83a6ff" fill-rule="evenodd"/>
+  <path d="M30 28H50V32H54V48H50V52H30V48H26V32H30Z M34 36V44H46V36Z" fill="#a6d879" fill-rule="evenodd"/>
+  <path d="M34 20H42L34 30H42L26 46L30 34H22Z" fill="#e6b56e" stroke="#171b28" stroke-width="2" stroke-linejoin="miter"/>
 </svg>
