@@ -192,18 +192,20 @@ pub fn draw(frame: &mut Frame, app: &App, palette: &Palette) {
         });
     let mut controls = if area.width >= 100 {
         vec![Line::from(format!(
-            "1–3 / Tab: Pages   g: Graph type   p: {}   u: {} upload   r: Refresh   ?: Help",
+            "1–3 / Tab: Pages   g: Graph type   p: {}   u: {} upload   t: {}   r: Refresh   ?: Help",
             if app.progress_bar {
                 "Try grid"
             } else {
                 "Try bar"
             },
-            if app.show_upload { "Hide" } else { "Show" }
+            if app.show_upload { "Hide" } else { "Show" },
+            app.theme.name()
         ))]
     } else if area.width >= 70 {
-        vec![Line::from(
-            "1–3: Pages · g: Graph type · p: Progress · ?: Help",
-        )]
+        vec![Line::from(format!(
+            "1–3: Pages · g: Graph · p: Progress · t: {} · ?: Help",
+            app.theme.name()
+        ))]
     } else {
         vec![]
     };
@@ -638,6 +640,20 @@ fn situation(app: &App) -> String {
     }
 }
 fn eta_copy(app: &App) -> (String, String) {
+    if let Some(value) = app.metrics.eta() {
+        let held = app.stale() || app.metrics.eta_seconds().is_none();
+        return (
+            format!("Time remaining: {value}"),
+            if held {
+                "Last estimate held · waiting for fresh progress."
+            } else if app.metrics.blocks_per_second == Some(0.0) {
+                "Briefly idle · estimate includes elapsed time."
+            } else {
+                "Rough estimate from recent progress; pace may change."
+            }
+            .into(),
+        );
+    }
     if app.stale() {
         return (
             "Time remaining: paused".into(),
@@ -647,20 +663,29 @@ fn eta_copy(app: &App) -> (String, String) {
     if app.metrics.blocks_per_second == Some(0.0) {
         return (
             "Time remaining: paused while verification is idle".into(),
-            "The estimate resumes when verification advances.".into(),
+            "Collecting progress for the first estimate.".into(),
         );
     }
-    match app.metrics.eta() {
-        Some(value) => (
-            format!("Time remaining: {value}"),
-            "A rough estimate; later blocks take more work.".into(),
+    (
+        "Time remaining: estimating…".into(),
+        "Collecting at least two minutes of verification progress.".into(),
+    )
+}
+fn completion_copy(app: &App) -> String {
+    match app.metrics.last_eta {
+        Some((at, seconds)) => format!(
+            "ETC: {} UTC{}",
+            (at + chrono::Duration::seconds(seconds as i64)).format("%a %d %b · %H:%M"),
+            if app.stale() || app.metrics.eta_seconds().is_none() {
+                " · last estimate"
+            } else {
+                " · approximate"
+            }
         ),
-        None => (
-            "Time remaining: estimating…".into(),
-            "Waiting for two minutes of steady verification progress.".into(),
-        ),
+        None => "ETC: estimating completion time…".into(),
     }
 }
+
 fn hero(frame: &mut Frame, area: Rect, app: &App, s: &Snapshot, p: &Palette) {
     let card = block(
         if s.chain.initialblockdownload {
@@ -743,9 +768,13 @@ fn hero(frame: &mut Frame, area: Rect, app: &App, s: &Snapshot, p: &Palette) {
                         .fg(p.foreground)
                         .add_modifier(Modifier::BOLD),
                 )),
+                Line::from(Span::styled(
+                    completion_copy(app),
+                    Style::default().fg(p.yellow).add_modifier(Modifier::BOLD),
+                )),
                 Line::from(Span::styled(explanation, Style::default().fg(p.muted))),
             ]),
-            Rect::new(left.x, left.y + 11, left.width, 2),
+            Rect::new(left.x, left.y + 11, left.width, 3),
         );
         if left.height >= 16 {
             frame.render_widget(
@@ -1562,6 +1591,7 @@ fn help(frame: &mut Frame, area: Rect, p: &Palette) {
         "g                  Cycle bandwidth, blocks/sec, verified tx/sec",
         "p                  Compare journey grid with segmented progress bar",
         "u                  Show or hide upload on the bandwidth chart",
+        "t                  Cycle System, Dark, Light, Ember, Aurora, Ocean palettes",
         "r                  Request a fresh node observation",
         "? / Escape         Open / close help",
         "q / Ctrl+C         Close dashboard; Bitcoin Core continues running",
@@ -1575,7 +1605,7 @@ fn help(frame: &mut Frame, area: Rect, p: &Palette) {
         "",
         "READING THE CHART",
         "Each column averages measured activity in its time interval; the window spans 120 seconds.",
-        "Blue/green/amber pixels show low/medium/high rate relative to the chart scale, not health.",
+        "The three pixel color bands show low/medium/high rate relative to the chart scale, not health.",
         "The color bands divide the scale at 35% and 70%. Upload uses contrasting diamond markers.",
         "Diamond markers show upload on the same scale. The labeled upper bound grows immediately",
         "for new peaks and falls gradually (about a 30-second decay) when older peaks expire.",
@@ -1651,6 +1681,29 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n")
     }
+    #[test]
+    fn completion_estimate_is_visible_and_survives_idle_and_disconnect() {
+        let mut app = App::default();
+        let mut s = snapshot();
+        s.observed_at = Utc::now() - chrono::Duration::seconds(120);
+        s.chain.verificationprogress = 0.10;
+        app.apply(Ok(s.clone()));
+        s.observed_at += chrono::Duration::seconds(120);
+        s.chain.verificationprogress = 0.11;
+        app.apply(Ok(s));
+        app.metrics.blocks_per_second = Some(0.0);
+        let display = render(&app, 240, 65);
+        assert!(display.contains("Time remaining: ~"));
+        assert!(display.contains("ETC:") && display.contains("· approximate"));
+        let completion = app.metrics.last_eta;
+        app.apply(Err("RPC unavailable".into()));
+        assert_eq!(app.metrics.last_eta, completion);
+        let display = render(&app, 240, 65);
+        assert!(display.contains("Time remaining: ~"));
+        assert!(display.contains("· last estimate"));
+        assert!(display.contains("Last estimate held"));
+    }
+
     #[test]
     fn calm_status_and_eta_distinguish_idle_stale_and_disconnected() {
         let mut app = App::default();

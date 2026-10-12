@@ -54,6 +54,7 @@ pub struct Metrics {
     pub blocks_per_second: Option<f64>,
     pub transactions_per_second: Option<f64>,
     pub scales: [f64; 3],
+    pub last_eta: Option<(DateTime<Utc>, u64)>,
     chain_previous: Option<ChainBaseline>,
     previous: Option<(DateTime<Utc>, u64, u64, Option<u64>)>,
     progress: VecDeque<(DateTime<Utc>, f64)>,
@@ -176,21 +177,37 @@ impl Metrics {
         let p = s.chain.verificationprogress;
         if !s.chain.initialblockdownload || !p.is_finite() || !(0.0..=1.0).contains(&p) {
             self.progress.clear();
+            self.last_eta = None;
             return;
         }
-        if let Some((at, old)) = self.progress.back()
-            && (s.observed_at <= *at || (s.observed_at - *at).num_seconds() > 15 || p < *old)
-        {
-            self.progress.clear();
+        if let Some((at, old)) = self.progress.back() {
+            if s.observed_at <= *at || p < *old {
+                self.progress.clear();
+                self.last_eta = None;
+            } else if (s.observed_at - *at).num_seconds() > 300 {
+                self.progress.clear();
+            }
         }
         self.progress.push_back((s.observed_at, p));
-        while self.progress.len() > 150 {
+        while self.progress.len() > 900 {
             self.progress.pop_front();
+        }
+        while self.progress.len() > 2
+            && self
+                .progress
+                .front()
+                .is_some_and(|(at, _)| (s.observed_at - *at).num_seconds() > 1800)
+        {
+            self.progress.pop_front();
+        }
+        if let Some(seconds) = self.eta_seconds() {
+            self.last_eta = Some((s.observed_at, seconds));
         }
     }
 
     pub fn eta(&self) -> Option<String> {
-        self.eta_seconds()
+        self.last_eta
+            .map(|(_, seconds)| seconds)
             .map(|remaining| format!("~{} remaining · rate may change", duration(remaining)))
     }
 
@@ -354,7 +371,7 @@ mod tests {
     }
 
     #[test]
-    fn eta_requires_continuous_measurements_and_rejects_discontinuity() {
+    fn eta_waits_for_progress_holds_across_outages_and_rejects_rollback() {
         let mut metrics = Metrics::default();
         for i in 0..60 {
             metrics.update(&sample(
@@ -366,8 +383,17 @@ mod tests {
         assert!(metrics.eta().is_none());
         metrics.update(&sample(120, Some(600_000), 0.16));
         assert!(metrics.eta().unwrap().contains("rate may change"));
+        metrics.pause();
+        assert!(metrics.eta().is_some());
+        metrics.update(&sample(150, Some(700_000), 0.17));
+        assert!(metrics.eta_seconds().is_some());
+        assert_eq!(
+            metrics.last_eta.unwrap().0,
+            sample(150, None, 0.17).observed_at
+        );
         metrics.update(&sample(900, Some(900_000), 0.4));
-        assert!(metrics.eta().is_none());
+        assert!(metrics.eta_seconds().is_none());
+        assert!(metrics.last_eta.is_some());
         metrics.update(&sample(902, Some(910_000), 0.01));
         assert!(metrics.eta().is_none());
     }

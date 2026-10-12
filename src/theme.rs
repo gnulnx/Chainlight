@@ -25,6 +25,73 @@ impl Default for Palette {
         }
     }
 }
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ThemeChoice {
+    #[default]
+    System,
+    Dark,
+    Light,
+    Ember,
+    Aurora,
+    Ocean,
+}
+impl ThemeChoice {
+    pub fn next(self) -> Self {
+        match self {
+            Self::System => Self::Dark,
+            Self::Dark => Self::Light,
+            Self::Light => Self::Ember,
+            Self::Ember => Self::Aurora,
+            Self::Aurora => Self::Ocean,
+            Self::Ocean => Self::System,
+        }
+    }
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::System => "System",
+            Self::Dark => "Dark",
+            Self::Light => "Light",
+            Self::Ember => "Ember",
+            Self::Aurora => "Aurora",
+            Self::Ocean => "Ocean",
+        }
+    }
+    pub fn palette(self, path: Option<&Path>) -> Palette {
+        if self == Self::System {
+            return Palette::load(path);
+        }
+        let colors = match self {
+            Self::Dark => [
+                "#161821", "#e8eaf2", "#959cb4", "#83a6ff", "#a6d879", "#e6b56e", "#ef8087",
+            ],
+            Self::Light => [
+                "#f5f2e9", "#252b38", "#636879", "#2856a6", "#39752e", "#935900", "#ae3440",
+            ],
+            Self::Ember => [
+                "#211815", "#f3e5d2", "#bca590", "#f7a054", "#dfc177", "#ea826e", "#ff7272",
+            ],
+            Self::Aurora => [
+                "#171b28", "#e4edf6", "#99abc4", "#7ed8c4", "#a5b6ff", "#e8a5d8", "#f58b9c",
+            ],
+            Self::Ocean => [
+                "#0e202b", "#e3f0f2", "#94b4bf", "#67c8ea", "#82dab4", "#e7cf81", "#f28b86",
+            ],
+            Self::System => unreachable!(),
+        };
+        let [background, foreground, muted, accent, green, yellow, red] =
+            colors.map(|c| parse_color(c).unwrap());
+        Palette {
+            background,
+            foreground,
+            muted,
+            accent,
+            green,
+            yellow,
+            red,
+        }
+        .ensure_readable()
+    }
+}
 impl Palette {
     pub fn load(path: Option<&Path>) -> Self {
         let mut palette = Self::default();
@@ -49,18 +116,21 @@ impl Palette {
                 _ => {}
             }
         }
-        if let Color::Rgb(..) = palette.background {
-            palette.foreground =
-                readable(palette.background, palette.foreground, palette.foreground);
-            palette.muted = readable(palette.background, palette.muted, palette.foreground);
-            palette.accent = readable(palette.background, palette.accent, palette.foreground);
-            palette.green = readable(palette.background, palette.green, palette.foreground);
-            palette.yellow = readable(palette.background, palette.yellow, palette.foreground);
-            palette.red = readable(palette.background, palette.red, palette.foreground);
+        palette.ensure_readable()
+    }
+    fn ensure_readable(mut self) -> Self {
+        if let Color::Rgb(..) = self.background {
+            self.foreground = readable(self.background, self.foreground, self.foreground);
+            self.muted = readable(self.background, self.muted, self.foreground);
+            self.accent = readable(self.background, self.accent, self.foreground);
+            self.green = readable(self.background, self.green, self.foreground);
+            self.yellow = readable(self.background, self.yellow, self.foreground);
+            self.red = readable(self.background, self.red, self.foreground);
         }
-        palette
+        self
     }
 }
+
 fn parse_color(s: &str) -> Option<Color> {
     if s.len() != 7 || !s.starts_with('#') || !s[1..].bytes().all(|c| c.is_ascii_hexdigit()) {
         return None;
@@ -124,6 +194,22 @@ fn readable(bg: Color, dim: Color, fg: Color) -> Color {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn built_in_palettes_cycle_and_keep_all_text_readable() {
+        let mut choice = ThemeChoice::System;
+        for _ in 0..5 {
+            choice = choice.next();
+            let p = choice.palette(None);
+            for color in [p.foreground, p.muted, p.accent, p.green, p.yellow, p.red] {
+                assert!(contrast(p.background, color) >= 4.5, "{}", choice.name());
+            }
+            assert_ne!(p.accent, p.green);
+            assert_ne!(p.green, p.yellow);
+        }
+        assert_eq!(choice.next(), ThemeChoice::System);
+        assert_eq!(ThemeChoice::System.palette(None).background, Color::Reset);
+    }
+
     #[test]
     fn default_inherits_terminal_background() {
         assert_eq!(Palette::load(None).background, Color::Reset);

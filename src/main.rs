@@ -87,7 +87,7 @@ fn run(args: Args) -> Result<(), String> {
             app.apply(Ok(snapshot));
             let mut terminal = Terminal::new(TestBackend::new(args.width, args.height))
                 .map_err(|e| e.to_string())?;
-            let palette = theme::Palette::load(args.theme_file.as_deref());
+            let palette = app.theme.palette(args.theme_file.as_deref());
             terminal
                 .draw(|frame| ui::draw(frame, &app, &palette))
                 .map_err(|e| e.to_string())?;
@@ -144,7 +144,7 @@ fn run(args: Args) -> Result<(), String> {
         while let Ok(result) = results_rx.try_recv() {
             app.apply(result);
         }
-        let palette = theme::Palette::load(args.theme_file.as_deref());
+        let palette = app.theme.palette(args.theme_file.as_deref());
         terminal
             .draw(|frame| ui::draw(frame, &app, &palette))
             .map_err(|e| e.to_string())?;
@@ -178,6 +178,7 @@ fn handle_key(
         KeyCode::Char('3') => app.tab = 2,
         KeyCode::Char('g') => app.graph = app.graph.next(),
         KeyCode::Char('u') => app.show_upload = !app.show_upload,
+        KeyCode::Char('t') => app.theme = app.theme.next(),
         KeyCode::Char('p') => app.progress_bar = !app.progress_bar,
         KeyCode::Char('r') => {
             let _ = refresh.try_send(());

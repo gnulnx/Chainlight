@@ -51,7 +51,9 @@ ssh -t USER@NODE_HOST /home/USER/.local/bin/chainlight
 ```
 
 Use **Tab**, arrows, or **1 / 2 / 3** for Overview, Peers and Storage; **?** opens
-help, **r** refreshes, and **q** quits. **g** cycles the activity chart through
+help, **r** refreshes, and **q** quits. **t** cycles System, Dark, Light, Ember,
+Aurora, and Ocean palettes. System follows the Omarchy theme (or terminal colors);
+the experimental choice resets to System on launch and does not change desktop settings. **g** cycles the activity chart through
 bandwidth, blocks/sec and verified transactions/sec; **u** toggles upload on the
 bandwidth chart.
 **p** compares the journey grid with a segmented progress bar in the full view.
@@ -66,7 +68,8 @@ The default is a 100-cell journey grid; solid squares are complete and a half
 square is in progress, distinguishable without color. Each square represents
 about 1% of estimated verification work, not an equal number of blocks. The ETA
 explains when it is collecting samples, idle, or waiting for fresh observations.
-It needs two minutes of steady measured progress and can change.
+It needs at least two minutes of measured progress and can change.
+An approximate completion time (ETC, UTC) appears directly below it.
 
 When Core leaves initial block download, the dashboard automatically emphasizes
 the verified tip, approximate age from its miner-reported timestamp, mempool,
@@ -76,7 +79,7 @@ when Core lacks enough observations.
 
 The pixel activity chart spans 120 seconds with UTC time labels. Each column
 is a time-weighted average of measured rates; its height and color use the
-visible chart scale. Blue, green, and amber bands show low, medium, and high
+visible chart scale. The palette’s three chart colors show low, medium, and high
 rates, divided at 35% and 70% of the scale; they do not indicate node health.
 A colored legend explains the bands. Upload uses contrasting diamond markers
 on the same scale. The vertical scale is labeled,
@@ -165,3 +168,10 @@ The Arch packaging recipe is a development artifact. No AUR listing, published
 binary release or completed cross-distribution qualification is claimed.
 
 MIT licensed; see [LICENSE](LICENSE).
+
+The verification panel shows an approximate completion date and time (ETC, UTC)
+below time remaining. The estimate needs two minutes of measured progress and
+uses up to 30 minutes of observations, including brief stalls and RPC gaps.
+The last estimate remains visible during outages and is labeled as held; a gap
+over five minutes restarts the measuring window. These estimates are experimental
+and are not a promise of completion time.

@@ -24,6 +24,7 @@ pub struct App {
     pub show_upload: bool,
     pub events: VecDeque<NodeEvent>,
     pub progress_bar: bool,
+    pub theme: crate::theme::ThemeChoice,
 }
 
 impl App {
