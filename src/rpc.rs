@@ -155,9 +155,16 @@ impl Client {
     }
 
     pub fn snapshot(&mut self) -> Result<Snapshot, String> {
+        self.snapshot_with_budget(Duration::from_secs(2))
+    }
+
+    fn snapshot_with_budget(&mut self, optional_budget: Duration) -> Result<Snapshot, String> {
         let deadline = Instant::now() + Duration::from_secs(20);
         let chain: ChainInfo = self.call("getblockchaininfo", deadline)?;
         let network = self.call("getnetworkinfo", deadline)?;
+        let observed_at = Utc::now();
+        // Optional details share a short budget rather than serial eight-second waits.
+        let deadline = deadline.min(Instant::now() + optional_budget);
         let mut notes = Vec::new();
         let traffic = self.optional("getnettotals", deadline, &mut notes);
         let peers = self.optional("getpeerinfo", deadline, &mut notes);
@@ -214,11 +221,12 @@ impl Client {
             .resources_at
             .is_none_or(|at| at.elapsed() >= Duration::from_secs(30))
         {
-            self.resources = sample_resources(&self.datadir, deadline);
+            self.resources =
+                sample_resources(&self.datadir, Instant::now() + Duration::from_millis(100));
             self.resources_at = Some(Instant::now());
         }
         Ok(Snapshot {
-            observed_at: Utc::now(),
+            observed_at,
             chain,
             network,
             traffic,
@@ -538,6 +546,19 @@ mod tests {
             srv.handle.join().unwrap();
         }
     }
+    #[test]
+    fn exhausted_optional_budget_still_publishes_core_observation() {
+        let srv = server(core_results());
+        let (mut c, _dir) = fixture(&srv);
+        let s = c.snapshot_with_budget(Duration::ZERO).unwrap();
+        assert_eq!(s.chain.blocks, 200);
+        assert_eq!(s.network.connections, 8);
+        assert!(s.traffic.is_none() && s.peers.is_none() && s.mempool.is_none());
+        assert_eq!(s.notes.len(), 4);
+        srv.handle.join().unwrap();
+        assert_eq!(srv.requests.try_iter().count(), 2);
+    }
+
     #[test]
     fn optional_failures_are_absent_and_snapshot_only_reads() {
         let mut responses = core_results();

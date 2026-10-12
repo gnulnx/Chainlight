@@ -125,11 +125,12 @@ fn run(args: Args) -> Result<(), String> {
     let worker_stop = stop.clone();
     thread::spawn(move || {
         while !worker_stop.load(Ordering::Relaxed) {
+            let started = std::time::Instant::now();
             if results_tx.send(client.snapshot()).is_err() {
                 break;
             }
             if matches!(
-                refresh_rx.recv_timeout(Duration::from_secs(2)),
+                refresh_rx.recv_timeout(Duration::from_secs(2).saturating_sub(started.elapsed())),
                 Err(mpsc::RecvTimeoutError::Disconnected)
             ) {
                 break;

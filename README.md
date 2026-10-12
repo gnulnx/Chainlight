@@ -87,6 +87,13 @@ Connection loss holds the previous chart until fresh measurements resume.
 Observations older than 15 seconds are marked stale even before an RPC timeout;
 retained progress and chart pixels lose their live coloring.
 
+The footer separates the live UTC clock from the last node observation and its
+age. Polling targets a two-second cadence, including request time. Optional RPC
+details share a two-second budget so a slow detail request does not hold up
+the core observation for the full timeout. Core itself may still respond slowly
+during intensive verification. Activity timestamps mark observed changes rather
+than every poll.
+
 Block throughput is the accepted height change per observation interval.
 Verified transaction throughput uses changes in Core's cumulative
 [`getchaintxstats` count](https://bitcoincore.org/en/doc/30.0.0/rpc/blockchain/getchaintxstats/),

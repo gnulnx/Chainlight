@@ -178,11 +178,18 @@ pub fn draw(frame: &mut Frame, app: &App, palette: &Palette) {
                 "Observed"
             };
             format!(
-                "{stale} {} UTC · 2s refresh",
-                s.observed_at.format("%H:%M:%S")
+                "Now {} UTC · {stale} {} · {}s ago · poll target 2s",
+                Utc::now().format("%H:%M:%S"),
+                s.observed_at.format("%H:%M:%S"),
+                (Utc::now() - s.observed_at).num_seconds().max(0),
             )
         })
-        .unwrap_or_else(|| "Connecting to local Bitcoin Core".to_string());
+        .unwrap_or_else(|| {
+            format!(
+                "Now {} UTC · Connecting to local Bitcoin Core",
+                Utc::now().format("%H:%M:%S")
+            )
+        });
     let mut controls = if area.width >= 100 {
         vec![Line::from(format!(
             "1–3 / Tab: Pages   g: Graph type   p: {}   u: {} upload   r: Refresh   ?: Help",
