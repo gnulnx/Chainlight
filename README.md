@@ -41,7 +41,14 @@ with `~/.bitcoin/.cookie`. Configuration flags:
 chainlight --datadir /path/to/bitcoin-data --rpc-url http://127.0.0.1:8332
 chainlight --snapshot                    # one live JSON observation
 chainlight --render --width 100          # one live text dashboard
+chainlight --setup                      # test and save a node connection
 ```
+
+If no default node is detected, the first launch opens connection setup.
+Tab selects a field, Ctrl+U clears it, and Enter tests the connection. Enter again
+saves the verified directory and URL; Esc cancels. F1 explains new-node setup and
+storage choices. Core installation and startup are separate. See
+[installation instructions](docs/INSTALL.md) for saved settings and release bundles.
 
 For other networks, supply that network's RPC port and cookie-containing
 directory. Remote access should run Chainlight on the node through SSH:

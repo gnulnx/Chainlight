@@ -24,4 +24,4 @@ jobs:
       - name: Integration script syntax
         run: |
           bash -n integrations/omarchy/chainlight-omarchy integrations/arch/PKGBUILD
-          python3 -m py_compile integrations/install-user.py integrations/arch/prepare-source.py
+          python3 -m py_compile integrations/install-user.py integrations/arch/prepare-source.py integrations/arch/prepare-release.py

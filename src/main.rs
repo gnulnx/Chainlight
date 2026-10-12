@@ -3,6 +3,7 @@
 mod app;
 mod metrics;
 mod rpc;
+mod setup;
 mod theme;
 mod types;
 mod ui;
@@ -41,8 +42,11 @@ struct Args {
     #[arg(long)]
     datadir: Option<PathBuf>,
     /// Loopback RPC URL; remote nodes require an SSH tunnel
-    #[arg(long, default_value = "http://127.0.0.1:8332")]
-    rpc_url: String,
+    #[arg(long)]
+    rpc_url: Option<String>,
+    /// Review, test and save your node connection
+    #[arg(long, conflicts_with_all = ["snapshot", "render"])]
+    setup: bool,
     /// Optional Omarchy colors.toml palette, reloaded while running
     #[arg(long)]
     theme_file: Option<PathBuf>,
@@ -72,11 +76,30 @@ impl Drop for TerminalGuard {
 }
 
 fn run(args: Args) -> Result<(), String> {
-    let datadir = args.datadir.unwrap_or_else(|| {
-        PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".bitcoin")
-    });
-    let mut client = rpc::Client::new(&args.rpc_url, datadir)?;
+    let settings_path = setup::config_path()?;
+    let saved = if args.setup {
+        setup::load(&settings_path).ok().flatten()
+    } else {
+        setup::load(&settings_path)?
+    };
+    let explicit_connection = args.datadir.is_some() || args.rpc_url.is_some();
+    let datadir = args
+        .datadir
+        .or_else(|| saved.as_ref().map(|c| c.datadir.clone()))
+        .unwrap_or_else(|| {
+            PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".bitcoin")
+        });
+    let rpc_url = args
+        .rpc_url
+        .or_else(|| saved.as_ref().map(|c| c.rpc_url.clone()))
+        .unwrap_or_else(|| "http://127.0.0.1:8332".into());
+    let mut connection = setup::Connection { datadir, rpc_url };
+    let needs_setup = args.setup
+        || (saved.is_none()
+            && !explicit_connection
+            && !connection.datadir.join(".cookie").is_file());
     if args.snapshot || args.render {
+        let mut client = rpc::Client::new(&connection.rpc_url, connection.datadir)?;
         let mut app = App::default();
         let snapshot = client.snapshot()?;
         if args.snapshot {
@@ -120,6 +143,22 @@ fn run(args: Args) -> Result<(), String> {
     for signal in [signal_hook::consts::SIGINT, signal_hook::consts::SIGTERM] {
         signal_hook::flag::register(signal, stop.clone()).map_err(|e| e.to_string())?;
     }
+    let mut terminal =
+        Terminal::new(CrosstermBackend::new(io::stdout())).map_err(|e| e.to_string())?;
+    if needs_setup {
+        let Some(selected) = setup::run(
+            &mut terminal,
+            connection,
+            &settings_path,
+            args.theme_file.as_deref(),
+            &stop,
+        )?
+        else {
+            return Ok(());
+        };
+        connection = selected;
+    }
+    let mut client = rpc::Client::new(&connection.rpc_url, connection.datadir)?;
     let (results_tx, results_rx) = mpsc::sync_channel(1);
     let (refresh_tx, refresh_rx) = mpsc::sync_channel(1);
     let worker_stop = stop.clone();
@@ -137,8 +176,6 @@ fn run(args: Args) -> Result<(), String> {
             }
         }
     });
-    let mut terminal =
-        Terminal::new(CrosstermBackend::new(io::stdout())).map_err(|e| e.to_string())?;
     let mut app = App::default();
     while !stop.load(Ordering::Relaxed) {
         while let Ok(result) = results_rx.try_recv() {

@@ -11,10 +11,11 @@ node operation or payment handling.
 
 ## First installable release
 
-- Complete first-run connection/setup for existing Core nodes and new users.
-- Explain storage choices and show real setup/sync status.
+- First-run connection checks, saved settings and a new-node/storage guide are
+  implemented. Automated Core installation/service setup remains future work.
 - Ship the native Omarchy launcher, pixel icon and System theme default.
-- Publish versioned source/release artifacts with checksums.
+- Release assembly, checksums and a draft-release workflow are implemented;
+  publish the reviewed versioned artifacts.
 - Turn the existing local PKGBUILD into a published AUR package using public,
   versioned sources, then validate install, update and removal on a clean system.
 - Document a short Omarchy installation and launch path.

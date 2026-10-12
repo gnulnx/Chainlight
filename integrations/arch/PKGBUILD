@@ -1,16 +1,18 @@
-# Local source package: assemble chainlight-0.2.0.tar.gz as documented.
-# No upstream release location is claimed before a public project exists.
+# Release recipe. prepare-source.py also produces the archive for local testing.
+# Publish the matching GitHub release before submitting this recipe to the AUR.
 pkgname=chainlight
-pkgver=0.2.0
+pkgver=0.3.0
 pkgrel=1
 pkgdesc='Portable terminal dashboard for Bitcoin Core with optional Omarchy integration'
+url='https://github.com/gnulnx/Chainlight'
 arch=('x86_64' 'aarch64')
 license=('MIT')
 depends=('bash' 'glibc' 'gcc-libs')
-optdepends=('bitcoin-core: local Bitcoin node' 'omarchy: themed desktop launcher')
+optdepends=('bitcoin-daemon: local Bitcoin node' 'omarchy: themed desktop launcher')
 makedepends=('rust')
-source=("$pkgname-$pkgver.tar.gz")
-sha256sums=('e3d8cdea9123f381f608d2e69b8181cc8b65545c3059ecb2269083e0b193a094')
+options=('!debug')
+source=("$pkgname-$pkgver.tar.gz::$url/releases/download/v$pkgver/$pkgname-$pkgver.tar.gz")
+sha256sums=('2d79625ad8e49707fec4c143ce53bc412cbe0efea5ad9cea656aa3c4c6a9afea')
 
 build() {
   cd "$srcdir/$pkgname-$pkgver"
