@@ -21,6 +21,23 @@ PNG icons into the user hicolor icon theme. It refuses existing destinations
 unless you add `--replace`. Updates atomically replace the executable, allowing
 a running dashboard to continue using its previous binary until you restart it.
 
+## Published Linux x86_64 bundle
+
+Download `chainlight-VERSION-linux-x86_64.tar.gz` and `SHA256SUMS` from the
+[release page](https://github.com/gnulnx/Chainlight/releases). In the download
+directory, verify the archive before extracting it:
+
+```sh
+sha256sum --ignore-missing --check SHA256SUMS
+tar -xzf chainlight-VERSION-linux-x86_64.tar.gz
+cd chainlight-VERSION-linux-x86_64
+python3 integrations/install-user.py ./chainlight --omarchy
+```
+
+Replace VERSION with the release version. Omit `--omarchy` for other desktops.
+For updates, add `--replace`. The bundle requires Linux x86_64 with glibc 2.35 or
+newer and Python 3 for installation; Rust and Cargo are not needed to run it.
+
 ## Omarchy
 
 Build as above, then install the separate Omarchy launcher:
@@ -96,12 +113,17 @@ chainlight --render --width 100
 They collect live data once and require a reachable node. Use `chainlight --help`
 for all flags.
 
-## Local Arch package
+## Arch package
 
 The PKGBUILD builds a local source archive using Cargo and the committed lockfile.
-The recipe targets a versioned GitHub release source archive. It has not been
-submitted to the AUR. Until that release is published, generate the archive
-locally before running makepkg; makepkg uses the local file when present.
+The recipe targets a versioned GitHub release source archive. Download the
+release's `PKGBUILD` into an empty directory and run `makepkg -si` there.
+This compiles the pinned source and installs the resulting package through
+pacman. No AUR account is required to use the recipe. AUR listing is a separate
+publication step; do not assume `yay -S chainlight` works until it is listed.
+
+For local development before a matching release is published, generate the
+archive first; makepkg uses the local file when present.
 
 From the project root:
 

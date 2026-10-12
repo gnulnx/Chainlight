@@ -1,5 +1,6 @@
 # Release recipe. prepare-source.py also produces the archive for local testing.
 # Publish the matching GitHub release before submitting this recipe to the AUR.
+# Maintainer: John Furr (gnulnx)
 pkgname=chainlight
 pkgver=0.3.0
 pkgrel=1
@@ -7,12 +8,12 @@ pkgdesc='Portable terminal dashboard for Bitcoin Core with optional Omarchy inte
 url='https://github.com/gnulnx/Chainlight'
 arch=('x86_64' 'aarch64')
 license=('MIT')
-depends=('bash' 'glibc' 'gcc-libs')
+depends=('bash' 'glibc' 'libgcc' 'hicolor-icon-theme')
 optdepends=('bitcoin-daemon: local Bitcoin node' 'omarchy: themed desktop launcher')
 makedepends=('rust')
 options=('!debug')
 source=("$pkgname-$pkgver.tar.gz::$url/releases/download/v$pkgver/$pkgname-$pkgver.tar.gz")
-sha256sums=('2d79625ad8e49707fec4c143ce53bc412cbe0efea5ad9cea656aa3c4c6a9afea')
+sha256sums=('59f84b2381e17456243521cc384cb0b94e2696fda9bf8c6b47f5a8185b151c3d')
 
 build() {
   cd "$srcdir/$pkgname-$pkgver"

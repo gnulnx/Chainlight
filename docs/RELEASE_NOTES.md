@@ -13,3 +13,9 @@ planned and are not implemented in this version.
 The CI-built executable targets Linux x86_64 and requires glibc 2.35 or newer.
 Other architectures can build from source with Rust 1.88 or newer.
 Verify downloaded archives using SHA256SUMS, then follow docs/INSTALL.md.
+
+The source package was built in a clean Arch Linux container and checked through
+pacman installation, update and removal. Interactive setup and RPC reads were
+tested against a local test server; live dashboard and Omarchy launcher behavior
+were separately verified on an Omarchy mini. Container checks do not qualify
+other architectures or every desktop environment.

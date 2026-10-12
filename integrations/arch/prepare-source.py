@@ -30,6 +30,9 @@ with archive.open('wb') as output:
                 info = tar.gettarinfo(str(path), arcname=name + '/' + str(path.relative_to(root)))
                 info.mtime = info.uid = info.gid = 0
                 info.uname = info.gname = ''
+                # Git tracks executability, not group-write permissions. Normalize
+                # modes so developer umasks and CI checkouts yield the same hash.
+                info.mode = 0o755 if info.mode & 0o111 else 0o644
                 with path.open('rb') as source:
                     tar.addfile(info, source)
 checksum = hashlib.sha256(archive.read_bytes()).hexdigest()

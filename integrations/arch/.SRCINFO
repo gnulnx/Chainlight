@@ -9,11 +9,12 @@ pkgbase = chainlight
 	makedepends = rust
 	depends = bash
 	depends = glibc
-	depends = gcc-libs
+	depends = libgcc
+	depends = hicolor-icon-theme
 	optdepends = bitcoin-daemon: local Bitcoin node
 	optdepends = omarchy: themed desktop launcher
 	options = !debug
 	source = chainlight-0.3.0.tar.gz::https://github.com/gnulnx/Chainlight/releases/download/v0.3.0/chainlight-0.3.0.tar.gz
-	sha256sums = 2d79625ad8e49707fec4c143ce53bc412cbe0efea5ad9cea656aa3c4c6a9afea
+	sha256sums = 59f84b2381e17456243521cc384cb0b94e2696fda9bf8c6b47f5a8185b151c3d
 
 pkgname = chainlight

@@ -171,8 +171,10 @@ Tests exercise real local HTTP flows, authentication rotation/redaction,
 redirect restrictions, malformed/unavailable RPC data, resource accounting,
 sync stages, rate and ETA behavior, theme reload, and terminal rendering.
 
-The Arch packaging recipe is a development artifact. No AUR listing, published
-binary release or completed cross-distribution qualification is claimed.
+Versioned downloads are listed on the [GitHub releases page](https://github.com/gnulnx/Chainlight/releases).
+The Arch recipe is included with each release. AUR publication is tracked separately;
+the recipe alone does not mean the package is listed there. See
+[installation instructions](docs/INSTALL.md) for downloads, builds and removal.
 
 MIT licensed; see [LICENSE](LICENSE).
 
