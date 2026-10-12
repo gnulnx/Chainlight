@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Chainlight
+Comment=Monitor Bitcoin Core synchronization and node health
+Exec=chainlight-omarchy
+Terminal=false
+Icon=chainlight
+Categories=System;Monitor;
+Keywords=Bitcoin;Node;Blockchain;
+StartupWMClass=org.chainlight.App
+StartupNotify=true

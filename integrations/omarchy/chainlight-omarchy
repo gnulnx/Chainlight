@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Omarchy owns terminal selection, font, app activation and window styling.
+# The portable application only receives the current palette when available.
+bindir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+app="$bindir/chainlight"
+if [[ ! -x "$app" ]]; then
+  app=$(command -v chainlight) || {
+    printf 'chainlight is not installed or is not executable.\n' >&2
+    exit 127
+  }
+fi
+theme="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/current/theme/colors.toml"
+args=()
+if [[ -r "$theme" ]]; then
+  args+=(--theme-file "$theme")
+fi
+if ! command -v omarchy-launch-tui >/dev/null 2>&1; then
+  printf 'Omarchy launcher is unavailable; run chainlight in a terminal.\n' >&2
+  exit 127
+fi
+exec omarchy-launch-tui --app-id=org.chainlight.App "$app" "${args[@]}" "$@"

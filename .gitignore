@@ -1,0 +1,5 @@
+/build/
+/chainlight
+__pycache__/
+*.tar.gz
+*.pkg.tar.*
