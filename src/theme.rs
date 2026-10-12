@@ -53,6 +53,10 @@ impl Palette {
             palette.foreground =
                 readable(palette.background, palette.foreground, palette.foreground);
             palette.muted = readable(palette.background, palette.muted, palette.foreground);
+            palette.accent = readable(palette.background, palette.accent, palette.foreground);
+            palette.green = readable(palette.background, palette.green, palette.foreground);
+            palette.yellow = readable(palette.background, palette.yellow, palette.foreground);
+            palette.red = readable(palette.background, palette.red, palette.foreground);
         }
         palette
     }
@@ -132,12 +136,24 @@ mod tests {
         }
     }
     #[test]
+    fn light_palette_keeps_pixel_and_status_colors_readable() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        fs::write(file.path(), "background = '#ffffff'\nforeground = '#222222'\nmuted = '#eeeeee'\naccent = '#aabbff'\ngreen = '#bbffaa'\nyellow = '#ffddaa'\nred = '#ffbbbb'\n").unwrap();
+        let p = Palette::load(Some(file.path()));
+        for color in [p.foreground, p.muted, p.accent, p.green, p.yellow, p.red] {
+            assert!(contrast(p.background, color) >= 4.5);
+        }
+        assert_ne!(p.accent, p.green);
+        assert_ne!(p.green, p.yellow);
+    }
+
+    #[test]
     fn reload_palette_and_ignore_escape_sequences() {
         let file = tempfile::NamedTempFile::new().unwrap();
         fs::write(file.path(),"background = '#ffffff'\nforeground = '#222222'\nmuted = '#aaaaaa'\naccent = '\u{1b}[31m'\n").unwrap();
         let light = Palette::load(Some(file.path()));
         assert!(contrast(light.background, light.muted) >= 4.5);
-        assert_eq!(light.accent, Palette::default().accent);
+        assert!(contrast(light.background, light.accent) >= 4.5);
         fs::write(file.path(),"background = '#000000'\nforeground = '#ffffff'\nmuted = '#111111'\naccent = '#f7931a'\n").unwrap();
         let dark = Palette::load(Some(file.path()));
         assert!(contrast(dark.background, dark.muted) >= 4.5);

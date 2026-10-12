@@ -19,6 +19,8 @@ The original Go/Bubble Tea implementation is preserved on the
 [`go-prototype` branch](https://github.com/gnulnx/Chainlight/tree/go-prototype)
 for comparison with this Rust iteration.
 
+![Chainlight verifying Bitcoin blocks on Omarchy](assets/screenshots/chainlight-ibd.png)
+
 ## Build and run
 
 Requires Rust 1.88 or newer, Cargo, and a running Bitcoin Core node. Core 31.1 has
@@ -49,7 +51,44 @@ ssh -t USER@NODE_HOST /home/USER/.local/bin/chainlight
 ```
 
 Use **Tab**, arrows, or **1 / 2 / 3** for Overview, Peers and Storage; **?** opens
-help, **r** refreshes, and **q** quits.
+help, **r** refreshes, and **q** quits. **g** cycles the activity chart through
+bandwidth, blocks/sec and verified transactions/sec; **u** toggles upload on the
+bandwidth chart.
+
+## A dashboard that follows your node
+
+During initial block download, verification leads: a large pixel percentage,
+estimated time remaining, and a fixed 100-cell work grid. Green cells represent
+completed percentage points; amber marks the current partial cell. Each cell
+is 1% of Core's estimated verification work, not an equal number of blocks.
+The ETA needs two minutes of continuous measured progress and can change.
+
+When Core leaves initial block download, the dashboard automatically emphasizes
+the verified tip, approximate age from its miner-reported timestamp, mempool,
+and Core fee estimates for 2, 6 and 12 block targets. Fee estimates refresh
+every 60 seconds and show unavailable when Core lacks enough observations.
+
+The pixel activity chart spans 120 seconds with UTC time labels. Each column
+is a time-weighted average of measured rates; its height and color use the
+visible chart scale. The legend labels blue/green/amber intensity bands. Upload
+appears as diamond markers on the same scale. Blank intervals mean no sample;
+dots mean measured zero. Connection loss holds the previous chart and marks it
+as held until fresh measurements resume.
+
+Block throughput is the accepted height change per observation interval.
+Verified transaction throughput uses changes in Core's cumulative
+[`getchaintxstats` count](https://bitcoincore.org/en/doc/30.0.0/rpc/blockchain/getchaintxstats/),
+pinned to the same verified tip as the observation. It is not mempool arrival
+rate or the network's long-term transaction rate. After IBD, both rates can
+burst when a block is accepted and read zero between blocks.
+
+The activity ticker reports observed tip advances, peer changes, network state,
+RPC loss/recovery, and sync completion. It aggregates changes between samples;
+timestamps are observation times, not exact log timestamps. It never invents
+individual block events that occurred between observations.
+
+Layout density adapts to terminal size, and explicit Omarchy palettes retain
+readable text and pixel colors on both dark and light backgrounds.
 
 ## Omarchy
 

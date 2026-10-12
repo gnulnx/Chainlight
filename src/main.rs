@@ -175,6 +175,8 @@ fn handle_key(
         KeyCode::Char('1') => app.tab = 0,
         KeyCode::Char('2') => app.tab = 1,
         KeyCode::Char('3') => app.tab = 2,
+        KeyCode::Char('g') => app.graph = app.graph.next(),
+        KeyCode::Char('u') => app.show_upload = !app.show_upload,
         KeyCode::Char('r') => {
             let _ = refresh.try_send(());
         }
@@ -206,6 +208,18 @@ mod tests {
         handle_key(&mut app, KeyCode::Char('r'), KeyModifiers::NONE, &tx);
         assert_eq!(rx.try_recv(), Ok(()));
         assert!(rx.try_recv().is_err());
+        for expected in [
+            metrics::GraphKind::Blocks,
+            metrics::GraphKind::Transactions,
+            metrics::GraphKind::Bandwidth,
+        ] {
+            handle_key(&mut app, KeyCode::Char('g'), KeyModifiers::NONE, &tx);
+            assert_eq!(app.graph, expected);
+        }
+        handle_key(&mut app, KeyCode::Char('u'), KeyModifiers::NONE, &tx);
+        assert!(app.show_upload);
+        handle_key(&mut app, KeyCode::Char('u'), KeyModifiers::NONE, &tx);
+        assert!(!app.show_upload);
         assert!(handle_key(
             &mut app,
             KeyCode::Char('q'),
