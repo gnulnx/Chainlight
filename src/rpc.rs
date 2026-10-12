@@ -24,6 +24,9 @@ pub struct Client {
     agent: ureq::Agent,
     resources: Resources,
     resources_at: Option<Instant>,
+    fee_estimates: Option<Vec<FeeEstimate>>,
+    fees_at: Option<Instant>,
+    fees_observed_at: Option<chrono::DateTime<Utc>>,
 }
 impl Client {
     pub fn new(endpoint: &str, datadir: PathBuf) -> Result<Self, String> {
@@ -60,10 +63,22 @@ impl Client {
             agent: config.into(),
             resources: Resources::default(),
             resources_at: None,
+            fee_estimates: None,
+            fees_at: None,
+            fees_observed_at: None,
         })
     }
 
     fn call<T: DeserializeOwned>(&self, method: &str, deadline: Instant) -> Result<T, String> {
+        self.call_params(method, json!([]), deadline)
+    }
+
+    fn call_params<T: DeserializeOwned>(
+        &self,
+        method: &str,
+        params: Value,
+        deadline: Instant,
+    ) -> Result<T, String> {
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
             return Err("Node observation deadline exceeded".into());
@@ -86,7 +101,7 @@ impl Client {
             .config()
             .timeout_global(Some(remaining.min(Duration::from_secs(8))))
             .build()
-            .send_json(json!({"jsonrpc":"2.0","id":"chainlight","method":method,"params":[]}))
+            .send_json(json!({"jsonrpc":"2.0","id":"chainlight","method":method,"params":params}))
             .map_err(|_| "Bitcoin Core RPC is unreachable — retrying".to_string())?;
         let status = response.status().as_u16();
         if status == 401 {
@@ -140,23 +155,78 @@ impl Client {
     }
 
     pub fn snapshot(&mut self) -> Result<Snapshot, String> {
+        self.snapshot_with_budget(Duration::from_secs(2))
+    }
+
+    fn snapshot_with_budget(&mut self, optional_budget: Duration) -> Result<Snapshot, String> {
         let deadline = Instant::now() + Duration::from_secs(20);
-        let chain = self.call("getblockchaininfo", deadline)?;
+        let chain: ChainInfo = self.call("getblockchaininfo", deadline)?;
         let network = self.call("getnetworkinfo", deadline)?;
+        let observed_at = Utc::now();
+        // Optional details share a short budget rather than serial eight-second waits.
+        let deadline = deadline.min(Instant::now() + optional_budget);
         let mut notes = Vec::new();
         let traffic = self.optional("getnettotals", deadline, &mut notes);
         let peers = self.optional("getpeerinfo", deadline, &mut notes);
         let mempool = self.optional("getmempoolinfo", deadline, &mut notes);
         let uptime_seconds = self.optional("uptime", deadline, &mut notes);
+        // Pin cumulative transaction counts to the same verified tip as this observation.
+        let verified_transactions = if chain.blocks > 0 && !chain.bestblockhash.is_empty() {
+            #[derive(serde::Deserialize)]
+            struct Stats {
+                txcount: u64,
+                window_final_block_height: u64,
+            }
+            match self.call_params::<Stats>(
+                "getchaintxstats",
+                json!([1, chain.bestblockhash]),
+                deadline,
+            ) {
+                Ok(stats) if stats.window_final_block_height == chain.blocks => Some(stats.txcount),
+                _ => {
+                    notes.push("Verified transaction count unavailable".into());
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        if !chain.initialblockdownload
+            && self
+                .fees_at
+                .is_none_or(|at| at.elapsed() >= Duration::from_secs(60))
+        {
+            let mut estimates = Vec::new();
+            for target in [2, 6, 12] {
+                let result = self
+                    .call_params::<Value>("estimatesmartfee", json!([target]), deadline)
+                    .ok();
+                estimates.push(FeeEstimate {
+                    target,
+                    blocks: result
+                        .as_ref()
+                        .and_then(|v| v["blocks"].as_u64())
+                        .and_then(|n| u16::try_from(n).ok()),
+                    sat_per_vbyte: result
+                        .as_ref()
+                        .and_then(|v| v["feerate"].as_f64())
+                        .map(|n| n * 100_000.0),
+                });
+            }
+            self.fee_estimates = Some(estimates);
+            self.fees_at = Some(Instant::now());
+            self.fees_observed_at = Some(Utc::now());
+        }
         if self
             .resources_at
             .is_none_or(|at| at.elapsed() >= Duration::from_secs(30))
         {
-            self.resources = sample_resources(&self.datadir, deadline);
+            self.resources =
+                sample_resources(&self.datadir, Instant::now() + Duration::from_millis(100));
             self.resources_at = Some(Instant::now());
         }
         Ok(Snapshot {
-            observed_at: Utc::now(),
+            observed_at,
             chain,
             network,
             traffic,
@@ -167,6 +237,9 @@ impl Client {
             datadir_bytes: self.resources.allocated,
             memory_available_bytes: self.resources.memory,
             uptime_seconds,
+            verified_transactions,
+            fee_estimates: self.fee_estimates.clone(),
+            fees_observed_at: self.fees_observed_at,
             notes,
         })
     }
@@ -207,6 +280,18 @@ fn validate_result(method: &str, value: &Value) -> Result<(), ()> {
         ],
         "getnettotals" => &["totalbytesrecv", "totalbytessent"],
         "getmempoolinfo" => &["size", "bytes", "usage", "maxmempool", "mempoolminfee"],
+        "getchaintxstats" => &["txcount", "window_final_block_height"],
+        "estimatesmartfee" => {
+            return if value["blocks"].as_u64().is_some()
+                && value.get("feerate").is_none_or(|v| {
+                    v.as_f64()
+                        .is_some_and(|n| n.is_finite() && n >= 0.0 && (n * 100_000.0).is_finite())
+                }) {
+                Ok(())
+            } else {
+                Err(())
+            };
+        }
         "getpeerinfo" => {
             return if value.as_array().is_some_and(|peers| {
                 peers.iter().all(|peer| {
@@ -462,6 +547,19 @@ mod tests {
         }
     }
     #[test]
+    fn exhausted_optional_budget_still_publishes_core_observation() {
+        let srv = server(core_results());
+        let (mut c, _dir) = fixture(&srv);
+        let s = c.snapshot_with_budget(Duration::ZERO).unwrap();
+        assert_eq!(s.chain.blocks, 200);
+        assert_eq!(s.network.connections, 8);
+        assert!(s.traffic.is_none() && s.peers.is_none() && s.mempool.is_none());
+        assert_eq!(s.notes.len(), 4);
+        srv.handle.join().unwrap();
+        assert_eq!(srv.requests.try_iter().count(), 2);
+    }
+
+    #[test]
     fn optional_failures_are_absent_and_snapshot_only_reads() {
         let mut responses = core_results();
         responses.extend((0..4).map(|_| (200, error(-32601, "Method unavailable"))));
@@ -510,6 +608,89 @@ mod tests {
         assert!(s.notes.is_empty());
         srv.handle.join().unwrap();
     }
+    #[test]
+    fn verified_counts_are_pinned_and_fee_quotes_are_cached_and_converted() {
+        fn observation(live: bool, tx: Value) -> Vec<(u16, String)> {
+            let mut responses = core_results();
+            let mut chain: Value = serde_json::from_str(&responses[0].1).unwrap();
+            chain["result"]["bestblockhash"] = json!("a".repeat(64));
+            chain["result"]["initialblockdownload"] = json!(!live);
+            responses[0].1 = chain.to_string();
+            responses.extend((0..4).map(|_| (200, error(-32601, "unavailable"))));
+            responses.push((200, envelope(tx)));
+            responses
+        }
+        let mut responses = observation(
+            true,
+            json!({"txcount":1234,"window_final_block_height":200}),
+        );
+        responses.extend([
+            (200, envelope(json!({"feerate":0.000015,"blocks":2}))),
+            (
+                200,
+                envelope(json!({"errors":["Insufficient data"],"blocks":6})),
+            ),
+            (200, envelope(json!({"feerate":0.000005,"blocks":12}))),
+        ]);
+        responses.extend(observation(
+            true,
+            json!({"txcount":1234,"window_final_block_height":200}),
+        ));
+        let srv = server(responses);
+        let (mut client, _dir) = fixture(&srv);
+        let first = client.snapshot().unwrap();
+        let second = client.snapshot().unwrap();
+        assert_eq!(first.verified_transactions, Some(1234));
+        let fees = first.fee_estimates.unwrap();
+        assert_eq!(fees[0].sat_per_vbyte, Some(1.5));
+        assert_eq!(fees[1].sat_per_vbyte, None);
+        assert_eq!(fees[2].sat_per_vbyte, Some(0.5));
+        assert_eq!(second.fee_estimates.unwrap()[0].sat_per_vbyte, Some(1.5));
+        assert_eq!(first.fees_observed_at, second.fees_observed_at);
+        let requests = srv
+            .requests
+            .try_iter()
+            .map(|(_, body)| serde_json::from_str::<Value>(&body).unwrap())
+            .collect::<Vec<_>>();
+        let stats = requests
+            .iter()
+            .filter(|r| r["method"] == "getchaintxstats")
+            .collect::<Vec<_>>();
+        assert_eq!(stats.len(), 2);
+        assert!(
+            stats
+                .iter()
+                .all(|r| r["params"] == json!([1, "a".repeat(64)]))
+        );
+        let fee_requests = requests
+            .iter()
+            .filter(|r| r["method"] == "estimatesmartfee")
+            .collect::<Vec<_>>();
+        assert_eq!(
+            fee_requests
+                .iter()
+                .map(|r| r["params"].clone())
+                .collect::<Vec<_>>(),
+            vec![json!([2]), json!([6]), json!([12])]
+        );
+        srv.handle.join().unwrap();
+
+        let srv = server(observation(
+            false,
+            json!({"txcount":1234,"window_final_block_height":201}),
+        ));
+        let (mut client, _dir) = fixture(&srv);
+        let s = client.snapshot().unwrap();
+        assert_eq!(s.verified_transactions, None);
+        assert!(s.fee_estimates.is_none());
+        assert!(
+            s.notes
+                .iter()
+                .any(|n| n.contains("Verified transaction count unavailable"))
+        );
+        srv.handle.join().unwrap();
+    }
+
     #[test]
     fn unsafe_urls_and_proxy_are_blocked() {
         for url in [

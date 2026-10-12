@@ -7,6 +7,7 @@ pub struct ChainInfo {
     pub chain: String,
     pub blocks: u64,
     pub headers: u64,
+    pub bestblockhash: String,
     pub time: i64,
     pub verificationprogress: f64,
     pub initialblockdownload: bool,
@@ -44,6 +45,7 @@ pub struct Peer {
     pub bytesrecv: u64,
     pub bytessent: u64,
     pub connection_type: String,
+    pub network: String,
     pub presynced_headers: i64,
     pub synced_headers: i64,
     pub synced_blocks: i64,
@@ -56,6 +58,12 @@ pub struct Mempool {
     pub usage: u64,
     pub maxmempool: u64,
     pub mempoolminfee: f64,
+}
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct FeeEstimate {
+    pub target: u16,
+    pub blocks: Option<u16>,
+    pub sat_per_vbyte: Option<f64>,
 }
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct Snapshot {
@@ -70,6 +78,12 @@ pub struct Snapshot {
     pub datadir_bytes: Option<u64>,
     pub memory_available_bytes: Option<u64>,
     pub uptime_seconds: Option<u64>,
+    #[serde(default)]
+    pub verified_transactions: Option<u64>,
+    #[serde(default)]
+    pub fee_estimates: Option<Vec<FeeEstimate>>,
+    #[serde(default)]
+    pub fees_observed_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub notes: Vec<String>,
 }

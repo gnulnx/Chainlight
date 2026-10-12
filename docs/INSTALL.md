@@ -57,6 +57,19 @@ session. Run `chainlight` directly within terminals and SSH sessions.
 
 ## SSH and RPC configuration
 
+On first launch, if the default node's cookie is absent and no connection flags
+were supplied, Chainlight opens a connection screen. Tab selects a field,
+Ctrl+U clears it; enter the absolute Core data directory and loopback RPC URL.
+Enter tests the node; a second Enter saves and opens the dashboard. Esc cancels
+without saving. F1 opens the new-node guide.
+
+Run `chainlight --setup` to review a connection later or correct invalid settings.
+Settings live in `${XDG_CONFIG_HOME:-$HOME/.config}/chainlight/config.toml`, mode
+0600. Only the directory and URL are saved, never the cookie or a password.
+Connection flags override saved settings. Snapshot/render commands never open
+setup or write settings. Existing default nodes open directly into the dashboard.
+Core installation and startup remain separate; see [NODE.md](NODE.md).
+
 For a node running on another machine:
 
 ```sh
@@ -86,8 +99,9 @@ for all flags.
 ## Local Arch package
 
 The PKGBUILD builds a local source archive using Cargo and the committed lockfile.
-It is a development packaging recipe; it has not been submitted to the AUR and
-there is no package release download to install.
+The recipe targets a versioned GitHub release source archive. It has not been
+submitted to the AUR. Until that release is published, generate the archive
+locally before running makepkg; makepkg uses the local file when present.
 
 From the project root:
 
@@ -106,8 +120,25 @@ The preparation script creates a deterministic source archive and pins its
 SHA-256 checksum in the PKGBUILD. Re-run it after source changes. The archive
 includes Rust source, lockfile, icons and public installation/node documentation;
 it excludes node data, downloaded Core, build output and local validation notes.
-Before AUR publication, use a published versioned source URL and test package
-installation, launcher behavior and removal on clean Arch.
+Before AUR publication, publish the matching release and test package
+installation, update, launcher behavior and removal on clean Arch.
+
+## Release preparation
+
+From a repository checkout, with Python 3.11 or newer,
+`cargo build --locked --release` followed by
+`python3 integrations/arch/prepare-release.py` assembles a Linux x86_64 binary
+bundle, deterministic source archive, PKGBUILD and SHA256SUMS in `build/release`.
+Extract the binary bundle and run
+`python3 integrations/install-user.py ./chainlight --omarchy` from its directory.
+
+The GitHub release workflow validates and builds on Ubuntu 22.04, uploads the
+artifacts, and creates a **draft** release for a version tag matching Cargo.toml.
+Drafts require review and publication before their download URL works publicly.
+Manual workflow runs only upload review artifacts. CI-built binaries require
+glibc 2.35 or newer; local builds inherit their build host requirements.
+Generate AUR metadata with `makepkg --printsrcinfo > .SRCINFO` once the archive
+checksum is final. Packaging preparation does not submit a package to the AUR.
 
 ## Remove a user installation
 
