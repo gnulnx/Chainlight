@@ -85,9 +85,10 @@ on Storage in roomy terminals. They refresh every 60 seconds and show unavailabl
 when Core lacks enough observations.
 
 The pixel activity chart spans 120 seconds with UTC time labels. Each column
-is a time-weighted average of measured rates; its height and color use the
+is a time-weighted average of measured rates; its height uses the
 visible chart scale. The palette’s three chart colors show low, medium, and high
-rates, divided at 35% and 70% of the scale; they do not indicate node health.
+rates, divided at 35% and 70% of the scale **when sampled**. That color profile
+stays with the historical sample even as heights auto-scale; it does not indicate node health.
 A colored legend explains the bands. Upload uses contrasting diamond markers
 on the same scale. The vertical scale is labeled,
 expands immediately for new peaks, and falls gradually with a 30-second decay
@@ -95,7 +96,8 @@ after old peaks expire. The current rate and last-two-minute peak are explicit.
 Blank intervals mean no sample; dots mean measured zero (explained in Help).
 Connection loss holds the previous chart until fresh measurements resume.
 Observations older than 15 seconds are marked stale even before an RPC timeout;
-retained progress and chart pixels lose their live coloring.
+retained progress is muted, while historical chart pixels keep their colors.
+The chart explicitly labels reconnecting or waiting states instead of fading history.
 
 The footer separates the live UTC clock from the last node observation and its
 age. Polling targets a two-second cadence, including request time. Optional RPC
