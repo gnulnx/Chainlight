@@ -10,7 +10,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Gauge, Paragraph, Row, Sparkline, Table, Tabs, Wrap},
+    widgets::{Block, Borders, Gauge, Paragraph, Row, Table, Tabs, Wrap},
 };
 
 pub fn draw(frame: &mut Frame, app: &App, palette: &Palette) {
@@ -551,12 +551,7 @@ fn network(frame: &mut Frame, area: Rect, app: &App, s: &Snapshot, p: &Palette) 
     ];
     frame.render_widget(Paragraph::new(text), inner);
     if inner.height >= 4 {
-        let graph = Rect::new(
-            inner.x,
-            inner.y + 3,
-            inner.width,
-            (inner.height - 3).min(10),
-        );
+        let graph = Rect::new(inner.x, inner.y + 3, inner.width, inner.height - 3);
         if app.error.is_some() || s.traffic.is_none() {
             frame.render_widget(
                 Paragraph::new("Network activity unavailable").style(Style::default().fg(p.muted)),
@@ -568,26 +563,71 @@ fn network(frame: &mut Frame, area: Rect, app: &App, s: &Snapshot, p: &Palette) 
                 graph,
             )
         } else {
-            let rates: Vec<u64> = app
-                .metrics
-                .rates
-                .iter()
-                .rev()
-                .take(usize::from(inner.width))
-                .copied()
-                .collect::<Vec<_>>()
-                .into_iter()
-                .rev()
-                .collect();
-            frame.render_widget(
-                Sparkline::default()
-                    .data(&rates)
-                    .style(Style::default().fg(p.accent)),
-                graph,
-            )
+            pixel_histogram(frame, graph, app, p);
         }
     }
 }
+fn pixel_histogram(frame: &mut Frame, area: Rect, app: &App, p: &Palette) {
+    let spacious = area.width >= 70 && area.height >= 12;
+    let pixel_width = if spacious { 2 } else { 1 };
+    let column_step = if spacious { 3 } else { 1 };
+    let row_step = if spacious { 2 } else { 1 };
+    let chart_height = area.height.saturating_sub(1);
+    let rows = chart_height.div_ceil(row_step);
+    let columns = area.width / column_step;
+    if rows == 0 || columns == 0 {
+        return;
+    }
+    let rates = app
+        .metrics
+        .rates
+        .iter()
+        .rev()
+        .take(usize::from(columns))
+        .copied()
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>();
+    let peak = rates.iter().copied().max().unwrap_or(0);
+    for (column, value) in rates.iter().enumerate() {
+        let ratio = if peak == 0 {
+            0.0
+        } else {
+            *value as f64 / peak as f64
+        };
+        let filled = (ratio * f64::from(rows)).ceil() as u16;
+        let color = if ratio <= 0.33 {
+            p.accent
+        } else if ratio <= 0.66 {
+            p.green
+        } else {
+            p.yellow
+        };
+        for row in 0..filled {
+            let y = area.y + chart_height - 1 - row * row_step;
+            frame.render_widget(
+                Paragraph::new("█".repeat(usize::from(pixel_width)))
+                    .style(Style::default().fg(color)),
+                Rect::new(area.x + column as u16 * column_step, y, pixel_width, 1),
+            );
+        }
+    }
+    let legend = Line::from(vec![
+        Span::styled(
+            format!("↓ DOWNLOAD · peak {}/s  ", human_bytes(peak)),
+            Style::default().fg(p.muted),
+        ),
+        Span::styled("■ low  ", Style::default().fg(p.accent)),
+        Span::styled("■ mid  ", Style::default().fg(p.green)),
+        Span::styled("■ high", Style::default().fg(p.yellow)),
+    ]);
+    frame.render_widget(
+        Paragraph::new(legend),
+        Rect::new(area.x, area.y + chart_height, area.width, 1),
+    );
+}
+
 fn compact(frame: &mut Frame, area: Rect, app: &App, s: &Snapshot, p: &Palette) {
     let mut lines = Vec::new();
     if s.chain.initialblockdownload && s.chain.headers == 0 && presync(s) > 0 {
