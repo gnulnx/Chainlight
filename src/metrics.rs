@@ -14,6 +14,12 @@ pub struct Metrics {
 }
 
 impl Metrics {
+    pub fn pause(&mut self) {
+        self.down = None;
+        self.up = None;
+        self.previous = None;
+    }
+
     pub fn update(&mut self, s: &Snapshot) {
         self.down = None;
         self.up = None;
@@ -31,7 +37,7 @@ impl Metrics {
                     self.down = Some(down);
                     self.up = Some((traffic.sent - sent) as f64 / seconds);
                     self.rates.push_back(down as u64);
-                } else {
+                } else if restart || traffic.received < received || traffic.sent < sent {
                     self.rates.clear();
                 }
             }
@@ -43,7 +49,6 @@ impl Metrics {
             ));
         } else {
             self.previous = None;
-            self.rates.clear();
         }
         while self.rates.len() > 90 {
             self.rates.pop_front();
@@ -113,10 +118,28 @@ mod tests {
         assert_eq!(metrics.down, Some(2000.0));
         metrics.update(&sample(4, None, 0.1));
         assert_eq!(metrics.down, None);
+        assert_eq!(metrics.rates, VecDeque::from([2000]));
         metrics.update(&sample(6, Some(20_000), 0.1));
         assert_eq!(metrics.down, None);
         metrics.update(&sample(8, Some(24_000), 0.1));
         assert_eq!(metrics.down, Some(2000.0));
+        assert_eq!(metrics.rates, VecDeque::from([2000, 2000]));
+    }
+
+    #[test]
+    fn gaps_hold_history_and_real_idle_samples_append_zero() {
+        let mut metrics = Metrics::default();
+        metrics.update(&sample(0, Some(10_000), 0.1));
+        metrics.update(&sample(2, Some(14_000), 0.1));
+        metrics.update(&sample(30, Some(50_000), 0.1));
+        assert_eq!(metrics.down, None);
+        assert_eq!(metrics.rates, VecDeque::from([2000]));
+        metrics.pause();
+        metrics.update(&sample(32, Some(54_000), 0.1));
+        assert_eq!(metrics.down, None);
+        metrics.update(&sample(34, Some(54_000), 0.1));
+        assert_eq!(metrics.down, Some(0.0));
+        assert_eq!(metrics.rates, VecDeque::from([2000, 0]));
     }
 
     #[test]

@@ -17,7 +17,10 @@ impl App {
                 self.current = Some(s);
                 self.error = None;
             }
-            Err(message) => self.error = Some(message),
+            Err(message) => {
+                self.metrics.pause();
+                self.error = Some(message);
+            }
         }
     }
 }

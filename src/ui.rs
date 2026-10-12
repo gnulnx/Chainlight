@@ -552,18 +552,18 @@ fn network(frame: &mut Frame, area: Rect, app: &App, s: &Snapshot, p: &Palette) 
     frame.render_widget(Paragraph::new(text), inner);
     if inner.height >= 4 {
         let graph = Rect::new(inner.x, inner.y + 3, inner.width, inner.height - 3);
-        if app.error.is_some() || s.traffic.is_none() {
+        if !app.metrics.rates.is_empty() {
+            pixel_histogram(frame, graph, app, p);
+        } else if app.error.is_some() || s.traffic.is_none() {
             frame.render_widget(
                 Paragraph::new("Network activity unavailable").style(Style::default().fg(p.muted)),
                 graph,
             )
-        } else if app.metrics.rates.len() < 2 {
+        } else {
             frame.render_widget(
                 Paragraph::new("Collecting network activity…").style(Style::default().fg(p.muted)),
                 graph,
             )
-        } else {
-            pixel_histogram(frame, graph, app, p);
         }
     }
 }
@@ -613,9 +613,16 @@ fn pixel_histogram(frame: &mut Frame, area: Rect, app: &App, p: &Palette) {
             );
         }
     }
+    let state = if app.error.is_some() {
+        "RECONNECTING · HISTORY HELD"
+    } else if app.metrics.down.is_none() {
+        "WAITING FOR SAMPLES · HISTORY HELD"
+    } else {
+        "DOWNLOAD · valid samples / gaps omitted"
+    };
     let legend = Line::from(vec![
         Span::styled(
-            format!("↓ DOWNLOAD · peak {}/s  ", human_bytes(peak)),
+            format!("↓ {state} · peak {}/s  ", human_bytes(peak)),
             Style::default().fg(p.muted),
         ),
         Span::styled("■ low  ", Style::default().fg(p.accent)),
@@ -872,6 +879,44 @@ mod tests {
             .map(|y| (0..w).map(|x| buffer[(x, y)].symbol()).collect::<String>())
             .collect::<Vec<_>>()
             .join("\n")
+    }
+    #[test]
+    fn histogram_survives_rpc_failure_and_missing_traffic() {
+        fn network_screen(app: &App) -> Vec<String> {
+            let mut terminal = Terminal::new(TestBackend::new(100, 26)).unwrap();
+            terminal
+                .draw(|frame| {
+                    network(
+                        frame,
+                        frame.area(),
+                        app,
+                        app.current.as_ref().unwrap(),
+                        &Palette::default(),
+                    );
+                })
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            (0..26)
+                .map(|y| (0..100).map(|x| buffer[(x, y)].symbol()).collect())
+                .collect()
+        }
+        let mut app = App {
+            current: Some(snapshot()),
+            ..Default::default()
+        };
+        app.metrics.rates.extend([1000, 3000, 0, 2000]);
+        app.metrics.down = Some(2000.0);
+        let before = network_screen(&app);
+        app.apply(Err("RPC unavailable".into()));
+        let failed = network_screen(&app);
+        assert_eq!(&before[4..24], &failed[4..24]);
+        assert!(failed[24].contains("RECONNECTING · HISTORY HELD"));
+        let mut missing = snapshot();
+        missing.traffic = None;
+        app.apply(Ok(missing));
+        let unavailable = network_screen(&app);
+        assert_eq!(&before[4..24], &unavailable[4..24]);
+        assert!(unavailable[24].contains("WAITING FOR SAMPLES · HISTORY HELD"));
     }
     #[test]
     fn startup_and_core_error_are_visible() {
