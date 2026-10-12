@@ -45,11 +45,11 @@ pub fn draw(frame: &mut Frame, app: &App, palette: &Palette) {
             Constraint::Length(2),
             Constraint::Min(1),
             Constraint::Length(if area.height >= 36 { 4 } else { 0 }),
-            Constraint::Length(2),
+            Constraint::Length(if area.width >= 70 { 3 } else { 2 }),
         ])
         .split(inner);
     let status = status(app);
-    let status_color = if app.error.is_some() {
+    let status_color = if app.stale() {
         palette.red
     } else if app
         .current
@@ -86,7 +86,7 @@ pub fn draw(frame: &mut Frame, app: &App, palette: &Palette) {
                     Span::styled(
                         app.current
                             .as_ref()
-                            .map(|s| format!("   {}", safe(&s.chain.chain)))
+                            .map(|s| format!("   {}", network_name(&s.chain.chain)))
                             .unwrap_or_default(),
                         Style::default().fg(palette.muted),
                     ),
@@ -104,8 +104,9 @@ pub fn draw(frame: &mut Frame, app: &App, palette: &Palette) {
             .style(Style::default().fg(palette.muted))
             .highlight_style(
                 Style::default()
-                    .fg(palette.accent)
-                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+                    .fg(palette.background)
+                    .bg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
             ),
         chunks[1],
     );
@@ -145,27 +146,33 @@ pub fn draw(frame: &mut Frame, app: &App, palette: &Palette) {
             body = pieces[1];
         }
     }
+    let mut retained = palette.clone();
+    if app.stale() {
+        retained.accent = palette.muted;
+        retained.green = palette.muted;
+    }
+    let body_palette = &retained;
     if app.help {
-        help(frame, body, palette)
+        help(frame, body, body_palette)
     } else if let Some(snapshot) = &app.current {
         if app.tab == 1 {
-            peers(frame, body, snapshot, palette)
+            peers(frame, body, snapshot, body_palette)
         } else if app.tab == 2 {
-            storage(frame, body, snapshot, palette)
+            storage(frame, body, snapshot, body_palette)
         } else if body.height < 14 || body.width < 60 {
-            compact(frame, body, app, snapshot, palette)
+            compact(frame, body, app, snapshot, body_palette)
         } else {
-            overview(frame, body, app, snapshot, palette)
+            overview(frame, body, app, snapshot, body_palette)
         }
     } else {
-        startup(frame, body, palette)
+        startup(frame, body, body_palette)
     }
     activity(frame, chunks[3], app, palette);
     let observed = app
         .current
         .as_ref()
         .map(|s| {
-            let stale = if app.error.is_some() {
+            let stale = if app.stale() {
                 "LAST SUCCESS"
             } else {
                 "Observed"
@@ -176,16 +183,31 @@ pub fn draw(frame: &mut Frame, app: &App, palette: &Palette) {
             )
         })
         .unwrap_or_else(|| "Connecting to local Bitcoin Core".to_string());
-    frame.render_widget(
-        Paragraph::new(vec![
-            Line::from(if area.width > 65 {
-                "← → / Tab pages   g graph   u upload   r refresh   ? help   q quit"
+    let mut controls = if area.width >= 100 {
+        vec![Line::from(format!(
+            "1–3 / Tab: Pages   g: Graph type   p: {}   u: {} upload   r: Refresh   ?: Help",
+            if app.progress_bar {
+                "Try grid"
             } else {
-                "1 2 3 pages · g graph · ? · q quit"
-            }),
-            Line::from(observed),
-        ])
-        .style(Style::default().fg(palette.muted)),
+                "Try bar"
+            },
+            if app.show_upload { "Hide" } else { "Show" }
+        ))]
+    } else if area.width >= 70 {
+        vec![Line::from(
+            "1–3: Pages · g: Graph type · p: Progress · ?: Help",
+        )]
+    } else {
+        vec![]
+    };
+    controls.push(Line::from(if area.width >= 70 {
+        "q: Close dashboard · Node continues running"
+    } else {
+        "q quit · Node keeps running"
+    }));
+    controls.push(Line::from(observed));
+    frame.render_widget(
+        Paragraph::new(controls).style(Style::default().fg(palette.foreground)),
         chunks[4],
     );
 }
@@ -248,7 +270,7 @@ fn pixel_header(
         Span::styled(
             app.current
                 .as_ref()
-                .map(|s| format!("   / {}", safe(&s.chain.chain)))
+                .map(|s| format!("   / {}", network_name(&s.chain.chain)))
                 .unwrap_or_default(),
             Style::default().fg(p.muted),
         ),
@@ -260,41 +282,66 @@ fn voxel_work(frame: &mut Frame, area: Rect, s: &Snapshot, p: &Palette) {
     let progress = s.chain.verificationprogress.clamp(0.0, 1.0);
     let filled = (progress * 100.0).floor() as usize;
     let partial = progress * 100.0 > filled as f64;
-    let rows = if area.width >= 40 && area.height < 13 {
-        5
-    } else {
-        10
-    };
-    let columns = 100 / rows;
+    let roomy = area.width >= 60 && area.height >= 14;
+    let (rows, columns) = if roomy { (5, 20) } else { (10, 10) };
     let mut lines = vec![
         Line::from(Span::styled(
             "THE VERIFICATION JOURNEY",
             Style::default().fg(p.accent).add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
-            "1 cell = 1% estimated work",
-            Style::default().fg(p.muted),
+            "Each square ≈ 1% of estimated work",
+            Style::default().fg(p.foreground),
         )),
     ];
+    let cell_width = if area.width >= 80 { 3 } else { 2 };
     for row in 0..rows {
         lines.push(Line::from(
             (0..columns)
                 .map(|col| {
                     let cell = row * columns + col;
                     let (glyph, color) = if cell < filled {
-                        ("■ ", p.green)
+                        (
+                            if roomy {
+                                format!("{} ", "█".repeat(cell_width))
+                            } else {
+                                "■ ".into()
+                            },
+                            p.accent,
+                        )
                     } else if cell == filled && partial {
-                        ("◧ ", p.yellow)
+                        (
+                            if roomy {
+                                format!("▐{} ", "░".repeat(cell_width - 1))
+                            } else {
+                                "◧ ".into()
+                            },
+                            p.foreground,
+                        )
                     } else {
-                        ("□ ", p.muted)
+                        (
+                            if roomy {
+                                format!("{} ", "░".repeat(cell_width))
+                            } else {
+                                "□ ".into()
+                            },
+                            p.muted,
+                        )
                     };
                     Span::styled(glyph, Style::default().fg(color))
                 })
                 .collect::<Vec<_>>(),
         ));
+        if roomy {
+            lines.push(Line::from(""));
+        }
     }
     lines.push(Line::from(Span::styled(
-        "Work, not equal block counts.",
+        "Solid = complete · half = in progress",
+        Style::default().fg(p.foreground),
+    )));
+    lines.push(Line::from(Span::styled(
+        "p: Try the segmented bar",
         Style::default().fg(p.muted),
     )));
     frame.render_widget(Paragraph::new(lines), area);
@@ -347,6 +394,9 @@ fn status(app: &App) -> &'static str {
             "WAITING FOR CORE"
         };
     }
+    if app.stale() {
+        return "STALE OBSERVATION · WAITING";
+    }
     let Some(s) = &app.current else {
         return "CONNECTING";
     };
@@ -386,7 +436,7 @@ fn optional(n: Option<u64>) -> String {
     n.map(human_bytes).unwrap_or_else(|| "Unavailable".into())
 }
 fn rate(app: &App) -> String {
-    if app.error.is_some() {
+    if app.stale() {
         return "Unavailable · connection lost".into();
     }
     if app.current.as_ref().is_some_and(|s| s.traffic.is_none()) {
@@ -413,22 +463,27 @@ fn block<'a>(title: &'a str, p: &Palette) -> Block<'a> {
         .border_type(ratatui::widgets::BorderType::Rounded)
 }
 fn kv(label: &str, value: String, p: &Palette) -> Line<'static> {
+    let value = if value.len() <= 16 && value.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+        format!("{value:>16}")
+    } else {
+        value
+    };
     Line::from(vec![
-        Span::styled(format!("{label:<20}"), Style::default().fg(p.muted)),
+        Span::styled(format!("{label:<20}"), Style::default().fg(p.foreground)),
         Span::styled(value, Style::default().fg(p.foreground)),
     ])
 }
 fn overview(frame: &mut Frame, area: Rect, app: &App, s: &Snapshot, p: &Palette) {
-    if area.width < 95 || area.height < 22 {
+    if area.width < 95 || area.height < 28 {
         let rows = Layout::vertical([Constraint::Length(9), Constraint::Min(5)]).split(area);
         chain(frame, rows[0], app, s, p);
         network(frame, rows[1], app, s, p);
         return;
     }
     let hero_height = if s.chain.initialblockdownload {
-        ((area.height * 55) / 100).max(15).min(area.height - 9)
+        20.min(area.height - 9)
     } else {
-        15.min(area.height - 9)
+        17.min(area.height - 9)
     };
     let rows = Layout::vertical([Constraint::Length(hero_height), Constraint::Min(8)])
         .spacing(1)
@@ -438,7 +493,7 @@ fn overview(frame: &mut Frame, area: Rect, app: &App, s: &Snapshot, p: &Palette)
         .spacing(1)
         .split(rows[1]);
     network(frame, cards[0], app, s, p);
-    let card = block("NODE HEALTH", p);
+    let card = block("NODE DETAILS", p);
     let inner = card.inner(cards[1]);
     frame.render_widget(card, cards[1]);
     let mut lines = vec![
@@ -453,7 +508,7 @@ fn overview(frame: &mut Frame, area: Rect, app: &App, s: &Snapshot, p: &Palette)
         kv(
             "Network",
             if s.network.networkactive {
-                "Active"
+                "Enabled (Core)"
             } else {
                 "Disabled"
             }
@@ -461,15 +516,15 @@ fn overview(frame: &mut Frame, area: Rect, app: &App, s: &Snapshot, p: &Palette)
             p,
         ),
         kv(
-            "Mode",
+            "Storage mode",
             if s.chain.pruned { "Pruned" } else { "Archival" }.into(),
             p,
         ),
-        kv("Databases", optional(s.datadir_bytes), p),
-        kv("Disk available", optional(s.disk_available_bytes), p),
-        kv("Available RAM", optional(s.memory_available_bytes), p),
+        kv("Core databases", optional(s.datadir_bytes), p),
+        kv("Filesystem free", optional(s.disk_available_bytes), p),
+        kv("Host RAM available", optional(s.memory_available_bytes), p),
         kv(
-            "Core uptime",
+            "Node running for",
             s.uptime_seconds
                 .map(duration)
                 .unwrap_or_else(|| "Unavailable".into()),
@@ -535,13 +590,81 @@ fn pixel_number(frame: &mut Frame, area: Rect, text: &str, color: ratatui::style
     );
 }
 
+fn network_name(name: &str) -> String {
+    match name {
+        "main" => "Bitcoin mainnet".into(),
+        "test" | "testnet4" => "Bitcoin testnet".into(),
+        "signet" => "Bitcoin signet".into(),
+        "regtest" => "Bitcoin regtest".into(),
+        _ => safe(name),
+    }
+}
+fn situation(app: &App) -> String {
+    if app.error.is_some() {
+        return "Dashboard disconnected · retrying · previous readings held".into();
+    }
+    if app.stale() {
+        return "Dashboard data is stale · waiting for a fresh observation".into();
+    }
+    let Some(s) = &app.current else {
+        return "Connecting to your Bitcoin node…".into();
+    };
+    if !s.network.networkactive {
+        return "Core networking is disabled · check your node settings".into();
+    }
+    if s.network.connections == 0 {
+        return "No peers connected · Core is looking for peers".into();
+    }
+    if s.disk_available_bytes
+        .is_some_and(|n| n < 1024 * 1024 * 1024)
+    {
+        return "Disk free is below 1 GiB · check Storage".into();
+    }
+    let warnings = &s.chain.warnings;
+    if warnings.as_str().is_some_and(|w| !w.is_empty())
+        || warnings.as_array().is_some_and(|w| !w.is_empty())
+    {
+        return "Core reported a warning · see the message above".into();
+    }
+    if !s.chain.initialblockdownload {
+        return "Core has left initial sync · watching for new blocks".into();
+    }
+    match app.metrics.blocks_per_second {
+        Some(n) if n > 0.0 => "Verification is advancing · no action needed for sync".into(),
+        Some(_) => "Verification is idle this sample · watching for progress".into(),
+        None => "Watching for verification progress…".into(),
+    }
+}
+fn eta_copy(app: &App) -> (String, String) {
+    if app.stale() {
+        return (
+            "Time remaining: paused".into(),
+            "Waiting for a fresh node observation.".into(),
+        );
+    }
+    if app.metrics.blocks_per_second == Some(0.0) {
+        return (
+            "Time remaining: paused while verification is idle".into(),
+            "The estimate resumes when verification advances.".into(),
+        );
+    }
+    match app.metrics.eta() {
+        Some(value) => (
+            format!("Time remaining: {value}"),
+            "A rough estimate; later blocks take more work.".into(),
+        ),
+        None => (
+            "Time remaining: estimating…".into(),
+            "Waiting for two minutes of steady verification progress.".into(),
+        ),
+    }
+}
 fn hero(frame: &mut Frame, area: Rect, app: &App, s: &Snapshot, p: &Palette) {
-    let ibd = s.chain.initialblockdownload;
     let card = block(
-        if ibd {
-            "CHAIN VERIFICATION / INITIAL BLOCK DOWNLOAD"
+        if s.chain.initialblockdownload {
+            "CHAIN VERIFICATION"
         } else {
-            "LIVE NODE / INDEPENDENTLY VERIFIED"
+            "YOUR BITCOIN NODE"
         },
         p,
     );
@@ -551,163 +674,171 @@ fn hero(frame: &mut Frame, area: Rect, app: &App, s: &Snapshot, p: &Palette) {
         .spacing(3)
         .split(inner);
     let left = columns[0];
-    if ibd && s.chain.headers == 0 && presync(s) > 0 {
-        chain(frame, left, app, s, p);
-    } else if ibd {
-        let progress = s.chain.verificationprogress.clamp(0.0, 1.0);
-        pixel_number(
-            frame,
-            Rect::new(left.x, left.y, left.width, 5),
-            &format!("{:.2}%", progress * 100.0),
-            p.accent,
-        );
-        frame.render_widget(
-            Paragraph::new(format!(
-                "{:.2}% ESTIMATED VERIFICATION WORK",
-                progress * 100.0
-            ))
-            .style(Style::default().fg(p.muted)),
-            Rect::new(left.x, left.y + 5, left.width, 1),
-        );
-        if left.height >= 13 {
-            let meter = Rect::new(left.x, left.y + 7, left.width, 2);
-            pixel_meter(frame, meter, progress, p);
-            let eta = if app.error.is_some() {
-                "Estimate unavailable · stale data".into()
-            } else {
-                app.metrics
-                    .eta()
-                    .unwrap_or_else(|| "Measuring · needs 2 minutes of continuous progress".into())
-            };
-            if left.height >= 22 {
-                let remaining = app.metrics.eta_seconds().filter(|_| app.error.is_none());
-                let minutes = remaining.is_some_and(|n| n < 3600);
-                frame.render_widget(
-                    Paragraph::new(if minutes {
-                        "ESTIMATED MINUTES REMAINING"
-                    } else {
-                        "ESTIMATED HOURS REMAINING"
-                    })
-                    .style(Style::default().fg(p.muted)),
-                    Rect::new(left.x, left.y + 10, left.width, 1),
-                );
-                let amount = remaining
-                    .map(|n| n.div_ceil(if minutes { 60 } else { 3600 }).to_string())
-                    .unwrap_or_else(|| "--".into());
-                pixel_number(
-                    frame,
-                    Rect::new(left.x, left.y + 11, left.width, 5),
-                    &amount,
-                    p.yellow,
-                );
-                frame.render_widget(
-                    Paragraph::new(eta)
-                        .style(Style::default().fg(p.yellow).add_modifier(Modifier::BOLD)),
-                    Rect::new(left.x, left.y + 16, left.width, 1),
-                );
-            } else {
-                frame.render_widget(
-                    Paragraph::new(vec![
-                        Line::from(Span::styled(
-                            "ESTIMATED TIME REMAINING",
-                            Style::default().fg(p.muted),
-                        )),
-                        Line::from(Span::styled(
-                            eta,
-                            Style::default().fg(p.yellow).add_modifier(Modifier::BOLD),
-                        )),
-                    ]),
-                    Rect::new(left.x, left.y + 10, left.width, 2),
-                );
-            }
-        }
-        if left.height >= 16 {
-            frame.render_widget(
-                Paragraph::new(vec![
-                    kv("Verified blocks", number(s.chain.blocks), p),
-                    kv("Validated headers", number(s.chain.headers), p),
-                    kv("Chain history", date(s.chain.time), p),
-                    kv(
-                        "Validation rate",
-                        app.metrics
-                            .blocks_per_second
-                            .filter(|_| app.error.is_none())
-                            .map(|n| format!("{n:.1} blocks/s"))
-                            .unwrap_or_else(|| "Measuring…".into()),
-                        p,
-                    ),
-                ]),
-                Rect::new(
-                    left.x,
-                    left.y + if left.height >= 22 { 18 } else { 13 },
-                    left.width,
-                    if left.height >= 22 {
-                        left.height - 18
-                    } else {
-                        left.height - 13
-                    },
-                ),
-            );
+    let phase = if app.stale() {
+        "Last observed state"
+    } else if s.chain.initialblockdownload {
+        "Initial sync"
+    } else {
+        "Up to date"
+    };
+    let mut intro = vec![
+        Line::from(Span::styled(
+            format!("{phase} · {}", network_name(&s.chain.chain)),
+            Style::default()
+                .fg(p.foreground)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(if s.chain.initialblockdownload {
+            "Your node is downloading and checking Bitcoin’s history."
         } else {
+            "Your node independently verifies Bitcoin. Watching for new blocks."
+        }),
+        Line::from(Span::styled(
+            situation(app),
+            Style::default().fg(if app.stale() || !s.network.networkactive {
+                p.yellow
+            } else {
+                p.foreground
+            }),
+        )),
+    ];
+    frame.render_widget(
+        Paragraph::new(std::mem::take(&mut intro)),
+        Rect::new(left.x, left.y, left.width, 3),
+    );
+    if s.chain.initialblockdownload {
+        if s.chain.headers == 0 && presync(s) > 0 {
             frame.render_widget(
                 Paragraph::new(format!(
-                    "{} blocks · {} headers · {}",
-                    number(s.chain.blocks),
-                    number(s.chain.headers),
-                    date(s.chain.time)
+                    "{} headers examined · discovering chain history",
+                    number(presync(s))
                 ))
-                .style(Style::default().fg(p.muted)),
-                Rect::new(left.x, left.y + left.height - 1, left.width, 1),
+                .style(Style::default().fg(p.accent)),
+                Rect::new(left.x, left.y + 4, left.width, 5),
+            );
+        } else {
+            pixel_number(
+                frame,
+                Rect::new(left.x, left.y + 4, left.width, 5),
+                &format!("{:.2}%", s.chain.verificationprogress * 100.0),
+                p.accent,
             );
         }
-        voxel_work(frame, columns[1], s, p);
-    } else {
-        pixel_number(
-            frame,
-            Rect::new(left.x, left.y, left.width, 5),
-            &s.chain.blocks.to_string(),
-            p.green,
+        frame.render_widget(
+            Paragraph::new(format!(
+                "{:.2}% estimated verification work",
+                s.chain.verificationprogress * 100.0
+            ))
+            .style(Style::default().fg(p.foreground)),
+            Rect::new(left.x, left.y + 9, left.width, 1),
         );
-        let age = tip_age(s, app.error.is_some());
+        let (eta, explanation) = eta_copy(app);
         frame.render_widget(
             Paragraph::new(vec![
                 Line::from(Span::styled(
-                    format!("VERIFIED TIP #{}", number(s.chain.blocks)),
-                    Style::default().fg(p.green).add_modifier(Modifier::BOLD),
+                    eta,
+                    Style::default()
+                        .fg(p.foreground)
+                        .add_modifier(Modifier::BOLD),
                 )),
-                kv("Time since block", age, p),
-                kv("Block timestamp", date(s.chain.time), p),
+                Line::from(Span::styled(explanation, Style::default().fg(p.muted))),
+            ]),
+            Rect::new(left.x, left.y + 11, left.width, 2),
+        );
+        if left.height >= 16 {
+            frame.render_widget(
+                Paragraph::new(vec![
+                    kv("Blocks checked", number(s.chain.blocks), p),
+                    kv("Headers checked", number(s.chain.headers), p),
+                    kv("Verified through", date(s.chain.time), p),
+                    kv(
+                        "Checking blocks",
+                        app.metrics
+                            .blocks_per_second
+                            .filter(|_| !app.stale())
+                            .map(|n| format!("{n:.1} blocks/s"))
+                            .unwrap_or_else(|| "Waiting for samples".into()),
+                        p,
+                    ),
+                ]),
+                Rect::new(left.x, left.y + 14, left.width, left.height - 14),
+            );
+        }
+        if app.progress_bar {
+            frame.render_widget(
+                Paragraph::new("VERIFICATION / SEGMENTED BAR")
+                    .style(Style::default().fg(p.accent).add_modifier(Modifier::BOLD)),
+                Rect::new(columns[1].x, columns[1].y, columns[1].width, 1),
+            );
+            pixel_meter(
+                frame,
+                Rect::new(columns[1].x, columns[1].y + 3, columns[1].width, 2),
+                s.chain.verificationprogress,
+                p,
+            );
+            frame.render_widget(
+                Paragraph::new("Estimated work completed\np: Try the journey grid")
+                    .style(Style::default().fg(p.foreground)),
+                Rect::new(columns[1].x, columns[1].y + 6, columns[1].width, 2),
+            );
+        } else {
+            voxel_work(frame, columns[1], s, p);
+        }
+    } else {
+        pixel_number(
+            frame,
+            Rect::new(left.x, left.y + 4, left.width, 5),
+            &s.chain.blocks.to_string(),
+            p.accent,
+        );
+        frame.render_widget(
+            Paragraph::new(vec![
+                kv(
+                    "Latest checked block",
+                    format!("#{}", number(s.chain.blocks)),
+                    p,
+                ),
+                kv("Approx. tip age", tip_age(s, app.stale()), p),
                 kv(
                     "Mempool",
                     s.mempool
                         .as_ref()
-                        .map(|m| {
-                            format!("{} transactions · {}", number(m.size), human_bytes(m.bytes))
-                        })
-                        .unwrap_or_else(|| "Unavailable".into()),
-                    p,
-                ),
-                kv(
-                    "Minimum fee",
-                    s.mempool
-                        .as_ref()
-                        .map(|m| format!("{:.2} sat/vB", m.mempoolminfee * 100_000.0))
+                        .map(|m| format!("{} transactions", number(m.size)))
                         .unwrap_or_else(|| "Unavailable".into()),
                     p,
                 ),
                 Line::from(Span::styled(
-                    "Block timestamps are miner-reported; age is approximate.",
+                    "Tip age uses the block’s miner-reported timestamp.",
                     Style::default().fg(p.muted),
                 )),
             ]),
             Rect::new(
                 left.x,
-                left.y + 6,
+                left.y + 10,
                 left.width,
-                left.height.saturating_sub(6),
+                left.height.saturating_sub(10),
             ),
         );
-        fee_view(frame, columns[1], s, p);
+        frame.render_widget(
+            Paragraph::new(vec![
+                Line::from(Span::styled(
+                    "LAST NODE OBSERVATION",
+                    Style::default()
+                        .fg(p.foreground)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Line::from(format!("{} UTC", s.observed_at.format("%H:%M:%S"))),
+                Line::from(""),
+                kv("Connected peers", number(s.network.connections as u64), p),
+                kv("Filesystem free", optional(s.disk_available_bytes), p),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "Quiet traffic between blocks is normal.",
+                    Style::default().fg(p.foreground),
+                )),
+            ]),
+            columns[1],
+        );
     }
 }
 fn tip_age(s: &Snapshot, stale: bool) -> String {
@@ -810,7 +941,7 @@ fn fee_view(frame: &mut Frame, area: Rect, s: &Snapshot, p: &Palette) {
 }
 fn chain(frame: &mut Frame, area: Rect, app: &App, s: &Snapshot, p: &Palette) {
     let title = if s.chain.initialblockdownload {
-        "INDEPENDENT VERIFICATION"
+        "INITIAL SYNC / DOWNLOADING & CHECKING HISTORY"
     } else {
         "UP TO DATE"
     };
@@ -832,8 +963,8 @@ fn chain(frame: &mut Frame, area: Rect, app: &App, s: &Snapshot, p: &Palette) {
                 Line::from("Discovering chain history before accepting headers."),
                 Line::from("Block verification has not started yet."),
                 kv("Verified blocks", number(s.chain.blocks), p),
-                kv("Validated headers", number(s.chain.headers), p),
-                kv("Chain history", date(s.chain.time), p),
+                kv("Headers checked", number(s.chain.headers), p),
+                kv("Verified through", date(s.chain.time), p),
             ]),
             inner,
         );
@@ -863,13 +994,7 @@ fn chain(frame: &mut Frame, area: Rect, app: &App, s: &Snapshot, p: &Palette) {
                 .gauge_style(Style::default().fg(p.accent)),
             rows[1],
         );
-        let eta = if app.error.is_some() {
-            "Estimate unavailable · stale data".into()
-        } else {
-            app.metrics
-                .eta()
-                .unwrap_or_else(|| "Measuring verification rate…".into())
-        };
+        let eta = eta_copy(app).0;
         frame.render_widget(
             Paragraph::new(eta).style(Style::default().fg(p.muted)),
             rows[2],
@@ -877,8 +1002,8 @@ fn chain(frame: &mut Frame, area: Rect, app: &App, s: &Snapshot, p: &Palette) {
         frame.render_widget(
             Paragraph::new(vec![
                 kv("Verified blocks", number(s.chain.blocks), p),
-                kv("Validated headers", number(s.chain.headers), p),
-                kv("Chain history", date(s.chain.time), p),
+                kv("Headers checked", number(s.chain.headers), p),
+                kv("Verified through", date(s.chain.time), p),
             ]),
             rows[3],
         );
@@ -919,7 +1044,7 @@ fn network(frame: &mut Frame, area: Rect, app: &App, s: &Snapshot, p: &Palette) 
     let card = block(&title, p);
     let inner = card.inner(area);
     frame.render_widget(card, area);
-    let current = if app.error.is_some() {
+    let current = if app.stale() {
         None
     } else {
         match app.graph {
@@ -929,11 +1054,15 @@ fn network(frame: &mut Frame, area: Rect, app: &App, s: &Snapshot, p: &Palette) 
         }
     };
     let mut text = vec![kv(
-        "Current",
+        if app.graph == GraphKind::Bandwidth {
+            "Download now"
+        } else {
+            "Checking now"
+        },
         current
             .map(|v| graph_rate(app.graph, v))
             .unwrap_or_else(|| {
-                if app.error.is_some() {
+                if app.stale() {
                     "Unavailable · connection lost".into()
                 } else {
                     "Unavailable · waiting for fresh samples".into()
@@ -946,19 +1075,13 @@ fn network(frame: &mut Frame, area: Rect, app: &App, s: &Snapshot, p: &Palette) 
             "Upload",
             app.metrics
                 .up
-                .filter(|_| app.error.is_none())
-                .map(|v| {
-                    format!(
-                        "{} · u {} overlay",
-                        graph_rate(GraphKind::Bandwidth, v),
-                        if app.show_upload { "hide" } else { "show" }
-                    )
-                })
+                .filter(|_| !app.stale())
+                .map(|v| graph_rate(GraphKind::Bandwidth, v))
                 .unwrap_or_else(|| "Unavailable".into()),
             p,
         ));
         text.push(kv(
-            "Received by Core",
+            "Downloaded total",
             s.traffic
                 .as_ref()
                 .map(|t| format!("{} since node start", human_bytes(t.received)))
@@ -1054,15 +1177,17 @@ fn pixel_histogram(frame: &mut Frame, area: Rect, app: &App, p: &Palette) {
     let pixel_width = if spacious { 2 } else { 1 };
     let column_step = if spacious { 3 } else { 1 };
     let row_step = if spacious { 2 } else { 1 };
-    let chart_height = area.height.saturating_sub(3);
+    let chart_height = area.height.saturating_sub(4);
     let rows = chart_height.div_ceil(row_step);
-    let columns = area.width / column_step;
+    let scale_width = if area.width >= 70 { 14 } else { 10 };
+    let columns = area.width.saturating_sub(scale_width) / column_step;
+    let graph_y = area.y + 1;
     if rows == 0 || columns == 0 {
         return;
     }
     let Some(plot) = time_plot(app, columns) else {
         frame.render_widget(
-            Paragraph::new(if app.error.is_some() {
+            Paragraph::new(if app.stale() {
                 "Network activity unavailable · reconnecting"
             } else {
                 "Collecting activity · two fresh observations needed"
@@ -1088,22 +1213,39 @@ fn pixel_histogram(frame: &mut Frame, area: Rect, app: &App, p: &Palette) {
     } else {
         peak
     };
+    let scale = scale.max(app.metrics.scales[app.graph as usize]).max(1.0);
+    let actual_peak = app.metrics.samples[app.graph as usize]
+        .iter()
+        .filter_map(|s| s.value(app.graph))
+        .fold(0.0_f64, f64::max);
+    frame.render_widget(
+        Paragraph::new(format!(
+            "Last 2 minutes · peak {}",
+            graph_rate(app.graph, actual_peak)
+        ))
+        .style(Style::default().fg(p.foreground)),
+        Rect::new(area.x, area.y, area.width, 1),
+    );
+    for (y, value) in [
+        (graph_y, scale),
+        (graph_y + chart_height / 2, scale / 2.0),
+        (graph_y + chart_height - 1, 0.0),
+    ] {
+        frame.render_widget(
+            Paragraph::new(graph_rate(app.graph, value)).style(Style::default().fg(p.foreground)),
+            Rect::new(area.x, y, scale_width, 1),
+        );
+    }
     for (column, bin) in plot.bins.iter().enumerate() {
         let Some((value, up)) = bin else {
             continue;
         };
         let ratio = if scale == 0.0 { 0.0 } else { value / scale };
         let filled = (ratio * f64::from(rows)).ceil() as u16;
-        let color = if ratio <= 0.33 {
-            p.accent
-        } else if ratio <= 0.66 {
-            p.green
-        } else {
-            p.yellow
-        };
-        let x = area.x + column as u16 * column_step;
+        let color = p.accent;
+        let x = area.x + scale_width + column as u16 * column_step;
         for row in 0..filled.min(rows) {
-            let y = area.y + chart_height - 1 - row * row_step;
+            let y = graph_y + chart_height - 1 - row * row_step;
             frame.render_widget(
                 Paragraph::new("█".repeat(usize::from(pixel_width)))
                     .style(Style::default().fg(color)),
@@ -1113,7 +1255,7 @@ fn pixel_histogram(frame: &mut Frame, area: Rect, app: &App, p: &Palette) {
         if *value == 0.0 {
             frame.render_widget(
                 Paragraph::new("·").style(Style::default().fg(p.muted)),
-                Rect::new(x, area.y + chart_height - 1, 1, 1),
+                Rect::new(x, graph_y + chart_height - 1, 1, 1),
             );
         }
         if upload
@@ -1122,9 +1264,9 @@ fn pixel_histogram(frame: &mut Frame, area: Rect, app: &App, p: &Palette) {
             && scale > 0.0
         {
             let level = (up / scale * f64::from(rows)).ceil() as u16;
-            let y = area.y + chart_height - 1 - level.saturating_sub(1).min(rows - 1) * row_step;
+            let y = graph_y + chart_height - 1 - level.saturating_sub(1).min(rows - 1) * row_step;
             frame.render_widget(
-                Paragraph::new("◆").style(Style::default().fg(p.foreground)),
+                Paragraph::new("◆").style(Style::default().fg(p.green)),
                 Rect::new(x, y, 1, 1),
             );
         }
@@ -1134,8 +1276,13 @@ fn pixel_histogram(frame: &mut Frame, area: Rect, app: &App, p: &Palette) {
         GraphKind::Blocks => app.metrics.blocks_per_second,
         GraphKind::Transactions => app.metrics.transactions_per_second,
     };
-    let held = app.error.is_some() || current.is_none();
-    let axis = Rect::new(area.x, area.y + chart_height, area.width, 1);
+    let held = app.stale() || current.is_none();
+    let axis = Rect::new(
+        area.x + scale_width,
+        graph_y + chart_height,
+        area.width - scale_width,
+        1,
+    );
     let left = (plot.end - chrono::Duration::seconds(120))
         .format("%H:%M:%S")
         .to_string();
@@ -1164,45 +1311,45 @@ fn pixel_histogram(frame: &mut Frame, area: Rect, app: &App, p: &Palette) {
             1,
         ),
     );
-    let legend = Line::from(vec![
-        Span::styled(
-            if upload {
-                format!(
-                    "Peak {} · scale {}   ",
-                    graph_rate(app.graph, peak),
-                    graph_rate(app.graph, scale)
-                )
-            } else {
-                format!("Chart peak {}   ", graph_rate(app.graph, peak))
-            },
-            Style::default()
-                .fg(p.foreground)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("■ 0–33%  ", Style::default().fg(p.accent)),
-        Span::styled("■ 33–66%  ", Style::default().fg(p.green)),
-        Span::styled("■ 66–100% of scale", Style::default().fg(p.yellow)),
-    ]);
     frame.render_widget(
-        Paragraph::new(legend),
-        Rect::new(area.x, area.y + chart_height + 1, area.width, 1),
+        Paragraph::new(if upload {
+            format!(
+                "Scale {} · ■ download / ◆ upload · u: Hide upload",
+                graph_rate(app.graph, scale)
+            )
+        } else {
+            format!(
+                "Scale {} · ■ {}",
+                graph_rate(app.graph, scale),
+                if app.graph == GraphKind::Bandwidth {
+                    "download"
+                } else {
+                    "checking rate"
+                }
+            )
+        })
+        .style(Style::default().fg(p.foreground)),
+        Rect::new(area.x, graph_y + chart_height + 1, area.width, 1),
     );
-    let state = if app.error.is_some() {
+    let state = if app.stale() {
         "RECONNECTING · HISTORY HELD"
     } else if held {
         "WAITING FOR SAMPLES · HISTORY HELD"
     } else if upload {
-        "LIVE · blank = no sample · ◆ upload / shared scale"
+        "Live observations · upload shares the scale"
     } else {
-        "LIVE · blank = no sample · dots = measured zero"
+        "Live observations · ?: Chart details"
     };
     frame.render_widget(
         Paragraph::new(state).style(Style::default().fg(if held { p.yellow } else { p.muted })),
-        Rect::new(area.x, area.y + chart_height + 2, area.width, 1),
+        Rect::new(area.x, graph_y + chart_height + 2, area.width, 1),
     );
 }
 fn compact(frame: &mut Frame, area: Rect, app: &App, s: &Snapshot, p: &Palette) {
-    let mut lines = Vec::new();
+    let mut lines = vec![Line::from(Span::styled(
+        situation(app),
+        Style::default().fg(p.foreground),
+    ))];
     if s.chain.initialblockdownload && s.chain.headers == 0 && presync(s) > 0 {
         lines.push(Line::from(Span::styled(
             format!("Pre-sync: {} headers examined", number(presync(s))),
@@ -1248,14 +1395,9 @@ fn compact(frame: &mut Frame, area: Rect, app: &App, s: &Snapshot, p: &Palette) 
                 .unwrap_or_else(|| "Unavailable".into())
         )));
     } else {
-        lines.push(Line::from(if app.error.is_some() {
-            "Estimate unavailable · stale data".into()
-        } else {
-            app.metrics
-                .eta()
-                .unwrap_or_else(|| "Measuring verification rate…".into())
-        }));
+        lines.push(Line::from(eta_copy(app).0));
     }
+
     frame.render_widget(Paragraph::new(lines), area);
 }
 fn peers(frame: &mut Frame, area: Rect, s: &Snapshot, p: &Palette) {
@@ -1330,7 +1472,7 @@ fn storage(frame: &mut Frame, area: Rect, s: &Snapshot, p: &Palette) {
     frame.render_widget(card, area);
     let mut rows = vec![
         kv(
-            "Mode",
+            "Storage mode",
             if s.chain.pruned { "Pruned" } else { "Archival" }.into(),
             p,
         ),
@@ -1347,9 +1489,9 @@ fn storage(frame: &mut Frame, area: Rect, s: &Snapshot, p: &Palette) {
         ));
     }
     rows.extend([
-        kv("Available RAM", optional(s.memory_available_bytes), p),
+        kv("Host RAM available", optional(s.memory_available_bytes), p),
         kv(
-            "Core uptime",
+            "Node running for",
             s.uptime_seconds
                 .map(duration)
                 .unwrap_or_else(|| "Unavailable".into()),
@@ -1374,7 +1516,18 @@ fn storage(frame: &mut Frame, area: Rect, s: &Snapshot, p: &Palette) {
             )),
         ]);
     }
-    frame.render_widget(Paragraph::new(rows), inner);
+    if inner.height >= 24 {
+        fee_view(
+            frame,
+            Rect::new(inner.x, inner.y + 12, inner.width, inner.height - 12),
+            s,
+            p,
+        );
+    }
+    frame.render_widget(
+        Paragraph::new(rows),
+        Rect::new(inner.x, inner.y, inner.width, inner.height.min(12)),
+    );
 }
 fn startup(frame: &mut Frame, area: Rect, p: &Palette) {
     frame.render_widget(
@@ -1391,7 +1544,42 @@ fn startup(frame: &mut Frame, area: Rect, p: &Palette) {
     );
 }
 fn help(frame: &mut Frame, area: Rect, p: &Palette) {
-    frame.render_widget(Paragraph::new(vec![Line::from("Tab / ← → / h l    Switch pages"),Line::from("1 2 3              Jump to a page"),Line::from("g                  Bandwidth / blocks/sec / verified tx/sec"),Line::from("u                  Toggle upload on bandwidth graph"),Line::from("r                  Refresh now"),Line::from("? / Escape         Show / close help"),Line::from("q / Ctrl+C         Quit; Core keeps running"),Line::from(""),Line::from(Span::styled("WHAT SYNC MEANS",Style::default().fg(p.accent))),Line::from("Headers establish the best-work chain. Blocks are downloaded and verified locally."),Line::from("Verification % estimates work completed, not bytes downloaded. Pruning removes older verified blocks."),Line::from("Header pre-sync can advance before Core reports accepted headers."),Line::from("Completion estimates use measured verification progress; the rate may change.")]).wrap(Wrap{trim:true}).block(block("HELP",p)),area);
+    let lines = vec![
+        "Tab / arrows / 1–3  Overview, Peers, Storage",
+        "g                  Cycle bandwidth, blocks/sec, verified tx/sec",
+        "p                  Compare journey grid with segmented progress bar",
+        "u                  Show or hide upload on the bandwidth chart",
+        "r                  Request a fresh node observation",
+        "? / Escape         Open / close help",
+        "q / Ctrl+C         Close dashboard; Bitcoin Core continues running",
+        "",
+        "WHAT SYNC MEANS",
+        "Verification % estimates the work of checking history, not a fraction of blocks or bytes.",
+        "Each journey square is about 1% of estimated work. A half square is in progress.",
+        "Later blocks contain more transactions and take more work to check.",
+        "Headers describe the chain; Core downloads and checks the blocks separately.",
+        "Time remaining needs two minutes of steady progress. Idle or stale readings pause it.",
+        "",
+        "READING THE CHART",
+        "Each column averages measured activity in its time interval; the window spans 120 seconds.",
+        "Height shows volume. Solid pixels show download/checking activity, not a health verdict.",
+        "Diamond markers show upload on the same scale. The labeled upper bound grows immediately",
+        "for new peaks and falls gradually (about a 30-second decay) when older peaks expire.",
+        "Dots mean measured zero; empty intervals mean no observation. Held history is labeled.",
+        "Verified tx/sec is the change in cumulative checked-chain transactions, not mempool arrivals.",
+        "",
+        "ACTIVITY AND STORAGE",
+        "Ticker timestamps are observation times; repeated block batches are grouped.",
+        "Host RAM available is system memory available, not Bitcoin Core's memory use.",
+        "Pruning limits retained block files, not total node storage or sync downloads.",
+        "Core fee estimates appear on Storage in roomy terminals; unavailable means no estimate.",
+    ];
+    frame.render_widget(
+        Paragraph::new(lines.into_iter().map(Line::from).collect::<Vec<_>>())
+            .wrap(Wrap { trim: true })
+            .block(block("HELP", p)),
+        area,
+    );
 }
 
 #[cfg(test)]
@@ -1450,6 +1638,49 @@ mod tests {
             .join("\n")
     }
     #[test]
+    fn calm_status_and_eta_distinguish_idle_stale_and_disconnected() {
+        let mut app = App::default();
+        app.apply(Ok(snapshot()));
+        assert!(eta_copy(&app).0.contains("estimating"));
+        app.metrics.blocks_per_second = Some(12.0);
+        assert!(situation(&app).contains("Verification is advancing"));
+        app.metrics.blocks_per_second = Some(0.0);
+        assert!(
+            eta_copy(&app)
+                .0
+                .contains("paused while verification is idle")
+        );
+        assert!(situation(&app).contains("idle this sample"));
+        app.current.as_mut().unwrap().observed_at = Utc::now() - chrono::Duration::seconds(30);
+        assert!(app.stale());
+        assert!(situation(&app).contains("data is stale"));
+        assert!(status(&app).contains("STALE OBSERVATION"));
+        let stale = render(&app, 200, 60);
+        assert!(stale.contains("Last observed state"));
+        assert!(stale.contains("Time remaining: paused"));
+        assert!(!stale.contains("no action needed"));
+        app.apply(Err("RPC unreachable".into()));
+        assert!(situation(&app).contains("Dashboard disconnected"));
+        assert!(status(&app).contains("CONNECTION LOST"));
+    }
+
+    #[test]
+    fn progress_experiment_has_one_graphic_and_explicit_exit_consequence() {
+        let mut app = App::default();
+        app.apply(Ok(snapshot()));
+        let grid = render(&app, 240, 65);
+        assert!(grid.contains("THE VERIFICATION JOURNEY"));
+        assert!(!grid.contains("VERIFICATION / SEGMENTED BAR"));
+        assert!(grid.contains("Node continues running"));
+        assert!(!grid.contains("ESTIMATED HOURS REMAINING"));
+        assert!(grid.contains('▐'));
+        app.progress_bar = true;
+        let bar = render(&app, 240, 65);
+        assert!(!bar.contains("THE VERIFICATION JOURNEY"));
+        assert!(bar.contains("VERIFICATION / SEGMENTED BAR"));
+    }
+
+    #[test]
     fn time_axis_has_real_gaps_and_uses_time_weighted_bins() {
         let end = Utc::now();
         let mut app = App::default();
@@ -1478,18 +1709,18 @@ mod tests {
         let mut app = App::default();
         app.apply(Ok(snapshot()));
         let ibd = render(&app, 160, 60);
-        assert!(ibd.contains("CHAIN VERIFICATION / INITIAL BLOCK DOWNLOAD"));
-        assert!(ibd.contains("34.80% ESTIMATED VERIFICATION WORK"));
+        assert!(ibd.contains("CHAIN VERIFICATION"));
+        assert!(ibd.contains("Initial sync · Bitcoin mainnet"));
+        assert!(ibd.contains("34.80% estimated verification work"));
         assert_eq!(
             ibd.matches('■').count() + ibd.matches('□').count() + ibd.matches('◧').count(),
             100
         );
-        assert!(ibd.contains("ESTIMATED HOURS REMAINING"));
+        assert!(ibd.contains("Time remaining: estimating…"));
+        assert!(!ibd.contains("ESTIMATED HOURS REMAINING"));
         let tiled = render(&app, 100, 40);
-        assert_eq!(
-            tiled.matches('■').count() + tiled.matches('□').count() + tiled.matches('◧').count(),
-            100
-        );
+        assert!(tiled.contains("34.80%"));
+        assert!(tiled.contains("Node continues running"));
         assert!(ibd.contains("NODE ACTIVITY"));
         assert!(!ibd.contains("FEE OUTLOOK"));
         let mut live = snapshot();
@@ -1502,11 +1733,15 @@ mod tests {
         }]);
         app.apply(Ok(live));
         let synced = render(&app, 160, 60);
-        assert!(synced.contains("LIVE NODE / INDEPENDENTLY VERIFIED"));
-        assert!(synced.contains("VERIFIED TIP #211,172"));
-        assert!(synced.contains("Time since block"));
-        assert!(synced.contains("FEE OUTLOOK / sat/vB"));
-        assert!(synced.contains("1.50"));
+        assert!(synced.contains("YOUR BITCOIN NODE"));
+        assert!(synced.contains("Up to date · Bitcoin mainnet"));
+        assert!(synced.contains("#211,172"));
+        assert!(synced.contains("Approx. tip age"));
+        assert!(!synced.contains("FEE OUTLOOK"));
+        app.tab = 2;
+        let details = render(&app, 160, 60);
+        assert!(details.contains("FEE OUTLOOK / sat/vB"));
+        assert!(details.contains("1.50"));
         assert!(synced.contains("SYNC COMPLETE"));
         assert!(!synced.contains("THE VERIFICATION JOURNEY"));
         assert!(!synced.contains("ESTIMATED HOURS REMAINING"));

@@ -54,26 +54,36 @@ Use **Tab**, arrows, or **1 / 2 / 3** for Overview, Peers and Storage; **?** ope
 help, **r** refreshes, and **q** quits. **g** cycles the activity chart through
 bandwidth, blocks/sec and verified transactions/sec; **u** toggles upload on the
 bandwidth chart.
+**p** compares the journey grid with a segmented progress bar in the full view.
+The footer makes the exit consequence explicit: **q closes the dashboard;
+Bitcoin Core continues running**.
 
 ## A dashboard that follows your node
 
-During initial block download, verification leads: a large pixel percentage,
-estimated time remaining, and a fixed 100-cell work grid. Green cells represent
-completed percentage points; amber marks the current partial cell. Each cell
-is 1% of Core's estimated verification work, not an equal number of blocks.
-The ETA needs two minutes of continuous measured progress and can change.
+During initial block download, verification leads: a plain-language sync state,
+large pixel percentage, estimated time remaining, and one progress graphic.
+The default is a 100-cell journey grid; solid squares are complete and a half
+square is in progress, distinguishable without color. Each square represents
+about 1% of estimated verification work, not an equal number of blocks. The ETA
+explains when it is collecting samples, idle, or waiting for fresh observations.
+It needs two minutes of steady measured progress and can change.
 
 When Core leaves initial block download, the dashboard automatically emphasizes
 the verified tip, approximate age from its miner-reported timestamp, mempool,
-and Core fee estimates for 2, 6 and 12 block targets. Fee estimates refresh
-every 60 seconds and show unavailable when Core lacks enough observations.
+and observation recency. Core fee estimates for 2, 6 and 12 block targets appear
+on Storage in roomy terminals. They refresh every 60 seconds and show unavailable
+when Core lacks enough observations.
 
 The pixel activity chart spans 120 seconds with UTC time labels. Each column
 is a time-weighted average of measured rates; its height and color use the
-visible chart scale. The legend labels blue/green/amber intensity bands. Upload
-appears as diamond markers on the same scale. Blank intervals mean no sample;
-dots mean measured zero. Connection loss holds the previous chart and marks it
-as held until fresh measurements resume.
+visible chart scale. A single hue denotes download/checking volume; upload uses
+diamond markers in a second hue on the same scale. The vertical scale is labeled,
+expands immediately for new peaks, and falls gradually with a 30-second decay
+after old peaks expire. The current rate and last-two-minute peak are explicit.
+Blank intervals mean no sample; dots mean measured zero (explained in Help).
+Connection loss holds the previous chart until fresh measurements resume.
+Observations older than 15 seconds are marked stale even before an RPC timeout;
+retained progress and chart pixels lose their live coloring.
 
 Block throughput is the accepted height change per observation interval.
 Verified transaction throughput uses changes in Core's cumulative
@@ -83,7 +93,9 @@ rate or the network's long-term transaction rate. After IBD, both rates can
 burst when a block is accepted and read zero between blocks.
 
 The activity ticker reports observed tip advances, peer changes, network state,
-RPC loss/recovery, and sync completion. It aggregates changes between samples;
+RPC loss/recovery, and sync completion. Consecutive block updates share one row,
+showing the latest observed batch while preserving meaningful transitions.
+It aggregates changes between samples;
 timestamps are observation times, not exact log timestamps. It never invents
 individual block events that occurred between observations.
 

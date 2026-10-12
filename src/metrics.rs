@@ -53,6 +53,7 @@ pub struct Metrics {
     pub samples: [VecDeque<RateSample>; 3],
     pub blocks_per_second: Option<f64>,
     pub transactions_per_second: Option<f64>,
+    pub scales: [f64; 3],
     chain_previous: Option<ChainBaseline>,
     previous: Option<(DateTime<Utc>, u64, u64, Option<u64>)>,
     progress: VecDeque<(DateTime<Utc>, f64)>,
@@ -95,6 +96,7 @@ impl Metrics {
                     for history in &mut self.samples {
                         history.clear();
                     }
+                    self.scales = [0.0; 3];
                 }
             }
             self.previous = Some((
@@ -125,6 +127,7 @@ impl Metrics {
                 for history in &mut self.samples {
                     history.clear();
                 }
+                self.scales = [0.0; 3];
             } else if seconds > 0.0 && seconds <= 15.0 {
                 self.blocks_per_second = Some((s.chain.blocks - blocks) as f64 / seconds);
                 self.transactions_per_second = tx
@@ -153,6 +156,12 @@ impl Metrics {
                         {
                             history.pop_front();
                         }
+                        let peak = history
+                            .iter()
+                            .filter_map(|s| s.value(kind))
+                            .fold(0.0_f64, f64::max);
+                        let scale = &mut self.scales[kind as usize];
+                        *scale = peak.max(*scale * (-seconds / 30.0).exp());
                     }
                 }
             }
@@ -272,6 +281,23 @@ mod tests {
         assert!(history(&metrics).is_empty());
         metrics.update(&sample(3, Some(20_000), 0.1));
         assert_eq!(metrics.down, None);
+    }
+
+    #[test]
+    fn chart_scale_falls_gradually_after_peak_expires_and_holds_when_paused() {
+        let mut metrics = Metrics::default();
+        metrics.update(&sample(0, Some(0), 0.1));
+        metrics.update(&sample(2, Some(20_000), 0.1));
+        assert_eq!(metrics.scales[0], 10_000.0);
+        for t in (4..=122).step_by(2) {
+            metrics.update(&sample(t, Some(20_000 + (t as u64 - 2) * 10), 0.1));
+        }
+        assert_eq!(metrics.scales[0], 10_000.0);
+        metrics.update(&sample(124, Some(21_220), 0.1));
+        assert!(metrics.scales[0] > 9_000.0 && metrics.scales[0] < 10_000.0);
+        let scale = metrics.scales[0];
+        metrics.pause();
+        assert_eq!(metrics.scales[0], scale);
     }
 
     #[test]

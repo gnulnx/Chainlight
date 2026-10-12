@@ -23,9 +23,18 @@ pub struct App {
     pub graph: GraphKind,
     pub show_upload: bool,
     pub events: VecDeque<NodeEvent>,
+    pub progress_bar: bool,
 }
 
 impl App {
+    pub fn stale(&self) -> bool {
+        self.error.is_some()
+            || self
+                .current
+                .as_ref()
+                .is_some_and(|s| (Utc::now() - s.observed_at).num_seconds() > 15)
+    }
+
     pub fn apply(&mut self, result: Result<Snapshot, String>) {
         match result {
             Ok(s) => {
@@ -48,6 +57,9 @@ impl App {
         }
     }
     fn record(&mut self, at: DateTime<Utc>, kind: &'static str, detail: String) {
+        if kind == "BLOCKS CHECKED" && self.events.back().is_some_and(|e| e.kind == kind) {
+            self.events.pop_back();
+        }
         self.events.push_back(NodeEvent { at, kind, detail });
         while self.events.len() > 32 {
             self.events.pop_front();
@@ -78,11 +90,11 @@ impl App {
         } else if s.chain.blocks > old.chain.blocks {
             self.record(
                 s.observed_at,
-                "BLOCK VERIFIED",
+                "BLOCKS CHECKED",
                 format!(
-                    "#{} · +{} since last observation",
-                    number(s.chain.blocks),
-                    number(s.chain.blocks - old.chain.blocks)
+                    "Verified {} more blocks · now #{}",
+                    number(s.chain.blocks - old.chain.blocks),
+                    number(s.chain.blocks)
                 ),
             );
         } else if s.chain.blocks < old.chain.blocks
@@ -195,7 +207,7 @@ mod tests {
         assert!(
             app.events
                 .iter()
-                .any(|e| e.kind == "BLOCK VERIFIED" && e.detail.contains("+25"))
+                .any(|e| e.kind == "BLOCKS CHECKED" && e.detail.contains("25 more blocks"))
         );
         assert_eq!(
             app.events
@@ -227,7 +239,8 @@ mod tests {
             s.chain.blocks += 1;
             app.apply(Ok(s.clone()));
         }
-        assert_eq!(app.events.len(), 32);
+        assert!(app.events.len() < 10);
+        assert_eq!(app.events.back().unwrap().kind, "BLOCKS CHECKED");
     }
 
     #[test]

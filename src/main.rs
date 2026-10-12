@@ -177,6 +177,7 @@ fn handle_key(
         KeyCode::Char('3') => app.tab = 2,
         KeyCode::Char('g') => app.graph = app.graph.next(),
         KeyCode::Char('u') => app.show_upload = !app.show_upload,
+        KeyCode::Char('p') => app.progress_bar = !app.progress_bar,
         KeyCode::Char('r') => {
             let _ = refresh.try_send(());
         }
@@ -220,6 +221,10 @@ mod tests {
         assert!(app.show_upload);
         handle_key(&mut app, KeyCode::Char('u'), KeyModifiers::NONE, &tx);
         assert!(!app.show_upload);
+        handle_key(&mut app, KeyCode::Char('p'), KeyModifiers::NONE, &tx);
+        assert!(app.progress_bar);
+        handle_key(&mut app, KeyCode::Char('p'), KeyModifiers::NONE, &tx);
+        assert!(!app.progress_bar);
         assert!(handle_key(
             &mut app,
             KeyCode::Char('q'),
