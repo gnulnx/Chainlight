@@ -35,6 +35,8 @@ pub struct RateSample {
     pub upload: Option<f64>,
     pub blocks: Option<f64>,
     pub transactions: Option<f64>,
+    /// Rate relative to its graph scale when observed; never reclassified later.
+    pub color_levels: [f64; 3],
 }
 impl RateSample {
     pub fn value(&self, kind: GraphKind) -> Option<f64> {
@@ -141,6 +143,7 @@ impl Metrics {
                     upload: self.up,
                     blocks: self.blocks_per_second,
                     transactions: self.transactions_per_second,
+                    color_levels: [0.0; 3],
                 };
                 for kind in [
                     GraphKind::Bandwidth,
@@ -163,6 +166,11 @@ impl Metrics {
                             .fold(0.0_f64, f64::max);
                         let scale = &mut self.scales[kind as usize];
                         *scale = peak.max(*scale * (-seconds / 30.0).exp());
+                        if let Some(recorded) = history.back_mut() {
+                            recorded.color_levels[kind as usize] =
+                                (recorded.value(kind).unwrap_or_default() / scale.max(1.0))
+                                    .clamp(0.0, 1.0);
+                        }
                     }
                 }
             }
@@ -254,6 +262,43 @@ mod tests {
             .filter_map(|s| s.download)
             .map(|n| n as u64)
             .collect()
+    }
+
+    #[test]
+    fn recorded_colors_survive_new_peaks_scale_decay_and_reconnects() {
+        let mut metrics = Metrics::default();
+        metrics.update(&sample(0, Some(0), 0.1));
+        metrics.update(&sample(2, Some(200), 0.1));
+        let color = metrics.samples[0][0].color_levels[0];
+        assert_eq!(color, 1.0);
+        metrics.update(&sample(4, Some(2200), 0.1));
+        assert_eq!(metrics.scales[0], 1000.0);
+        assert_eq!(metrics.samples[0][0].color_levels[0], color);
+        metrics.update(&sample(6, Some(2400), 0.1));
+        assert_eq!(metrics.samples[0][2].color_levels[0], 0.1);
+        metrics.pause();
+        assert_eq!(metrics.samples[0][0].color_levels[0], color);
+        metrics.update(&sample(8, Some(2600), 0.1));
+        metrics.update(&sample(10, Some(2800), 0.1));
+        assert_eq!(metrics.samples[0][0].color_levels[0], color);
+        assert_eq!(metrics.samples[0][2].color_levels[0], 0.1);
+        let retained_end = metrics.samples[0][2].end;
+        for second in (12..=126).step_by(2) {
+            metrics.update(&sample(
+                second,
+                Some(2800 + (second - 10) as u64 * 100),
+                0.1,
+            ));
+        }
+        assert!(metrics.scales[0] < 1000.0);
+        assert_eq!(
+            metrics.samples[0]
+                .iter()
+                .find(|s| s.end == retained_end)
+                .unwrap()
+                .color_levels[0],
+            0.1
+        );
     }
 
     #[test]

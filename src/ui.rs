@@ -162,7 +162,7 @@ pub fn draw(frame: &mut Frame, app: &App, palette: &Palette) {
         } else if body.height < 14 || body.width < 60 {
             compact(frame, body, app, snapshot, body_palette)
         } else {
-            overview(frame, body, app, snapshot, body_palette)
+            overview(frame, body, app, snapshot, body_palette, palette)
         }
     } else {
         startup(frame, body, body_palette)
@@ -477,11 +477,18 @@ fn kv(label: &str, value: String, p: &Palette) -> Line<'static> {
         Span::styled(value, Style::default().fg(p.foreground)),
     ])
 }
-fn overview(frame: &mut Frame, area: Rect, app: &App, s: &Snapshot, p: &Palette) {
+fn overview(
+    frame: &mut Frame,
+    area: Rect,
+    app: &App,
+    s: &Snapshot,
+    p: &Palette,
+    history_palette: &Palette,
+) {
     if area.width < 95 || area.height < 28 {
         let rows = Layout::vertical([Constraint::Length(9), Constraint::Min(5)]).split(area);
         chain(frame, rows[0], app, s, p);
-        network(frame, rows[1], app, s, p);
+        network(frame, rows[1], app, s, history_palette);
         return;
     }
     let hero_height = if s.chain.initialblockdownload {
@@ -496,7 +503,7 @@ fn overview(frame: &mut Frame, area: Rect, app: &App, s: &Snapshot, p: &Palette)
     let cards = Layout::horizontal([Constraint::Percentage(72), Constraint::Percentage(28)])
         .spacing(1)
         .split(rows[1]);
-    network(frame, cards[0], app, s, p);
+    network(frame, cards[0], app, s, history_palette);
     let card = block("NODE DETAILS", p);
     let inner = card.inner(cards[1]);
     frame.render_widget(card, cards[1]);
@@ -1158,6 +1165,7 @@ fn graph_rate(kind: GraphKind, value: f64) -> String {
 struct TimePlot {
     end: DateTime<Utc>,
     bins: Vec<Option<(f64, Option<f64>)>>,
+    color_levels: Vec<f64>,
 }
 fn time_plot(app: &App, columns: u16) -> Option<TimePlot> {
     let samples = &app.metrics.samples[app.graph as usize];
@@ -1169,10 +1177,12 @@ fn time_plot(app: &App, columns: u16) -> Option<TimePlot> {
     let start = end - chrono::Duration::seconds(120);
     let step = 120_000.0 / f64::from(columns);
     let mut bins = Vec::new();
+    let mut color_levels = Vec::new();
     for column in 0..columns {
         let left = f64::from(column) * step;
         let right = left + step;
         let (mut total, mut seconds, mut up_total, mut up_seconds) = (0.0, 0.0, 0.0, 0.0);
+        let mut color_total = 0.0;
         for sample in samples {
             let a = (sample.start - start).num_milliseconds() as f64;
             let b = (sample.end - start).num_milliseconds() as f64;
@@ -1181,6 +1191,7 @@ fn time_plot(app: &App, columns: u16) -> Option<TimePlot> {
                 && let Some(value) = sample.value(app.graph)
             {
                 total += value * overlap;
+                color_total += sample.color_levels[app.graph as usize] * overlap;
                 seconds += overlap;
                 if let Some(up) = sample.upload {
                     up_total += up * overlap;
@@ -1200,8 +1211,38 @@ fn time_plot(app: &App, columns: u16) -> Option<TimePlot> {
         } else {
             None
         });
+        color_levels.push(if seconds > 0.0 {
+            color_total / seconds
+        } else {
+            0.0
+        });
     }
-    Some(TimePlot { end, bins })
+    Some(TimePlot {
+        end,
+        bins,
+        color_levels,
+    })
+}
+fn history_pixel_color(
+    row: u16,
+    filled: u16,
+    captured_level: f64,
+    p: &Palette,
+) -> ratatui::style::Color {
+    // Rescale height, but keep each bar's captured blue/green/amber profile.
+    // At one-pixel height, retain the top color rather than losing its identity.
+    let level = if filled <= 1 {
+        captured_level
+    } else {
+        f64::from(row) / f64::from(filled - 1) * captured_level
+    };
+    if level <= 0.35 {
+        p.accent
+    } else if level <= 0.70 {
+        p.green
+    } else {
+        p.yellow
+    }
 }
 fn pixel_histogram(frame: &mut Frame, area: Rect, app: &App, p: &Palette) {
     let spacious = area.width >= 70 && area.height >= 12;
@@ -1276,14 +1317,7 @@ fn pixel_histogram(frame: &mut Frame, area: Rect, app: &App, p: &Palette) {
         let x = area.x + scale_width + column as u16 * column_step;
         for row in 0..filled.min(rows) {
             let y = graph_y + chart_height - 1 - row * row_step;
-            let level = f64::from(row + 1) / f64::from(rows);
-            let color = if level <= 0.35 {
-                p.accent
-            } else if level <= 0.70 {
-                p.green
-            } else {
-                p.yellow
-            };
+            let color = history_pixel_color(row, filled, plot.color_levels[column], p);
             frame.render_widget(
                 Paragraph::new("█".repeat(usize::from(pixel_width)))
                     .style(Style::default().fg(color)),
@@ -1363,7 +1397,7 @@ fn pixel_histogram(frame: &mut Frame, area: Rect, app: &App, p: &Palette) {
         Span::styled("■", Style::default().fg(p.green)),
         Span::raw(" medium  "),
         Span::styled("■", Style::default().fg(p.yellow)),
-        Span::raw(" high · chart scale"),
+        Span::raw(" high · scale when sampled"),
     ];
     if upload {
         legend.push(Span::styled("  ◆", Style::default().fg(p.foreground)));
@@ -1606,7 +1640,7 @@ fn help(frame: &mut Frame, area: Rect, p: &Palette) {
         "READING THE CHART",
         "Each column averages measured activity in its time interval; the window spans 120 seconds.",
         "The three pixel color bands show low/medium/high rate relative to the chart scale, not health.",
-        "The color bands divide the scale at 35% and 70%. Upload uses contrasting diamond markers.",
+        "Colors use the scale when sampled (35% / 70% bands), held as history scrolls. Heights auto-scale.",
         "Diamond markers show upload on the same scale. The labeled upper bound grows immediately",
         "for new peaks and falls gradually (about a 30-second decay) when older peaks expire.",
         "Dots mean measured zero; empty intervals mean no observation. Held history is labeled.",
@@ -1748,6 +1782,57 @@ mod tests {
     }
 
     #[test]
+    fn historic_bar_keeps_its_amber_cap_after_a_large_peak_and_while_stale() {
+        use crate::metrics::RateSample;
+        let mut app = App {
+            current: Some(snapshot()),
+            ..Default::default()
+        };
+        let end = app.current.as_ref().unwrap().observed_at;
+        app.metrics.samples[0].push_back(RateSample {
+            start: end - chrono::Duration::seconds(10),
+            end,
+            download: Some(100.0),
+            upload: Some(5000.0),
+            blocks: None,
+            transactions: None,
+            color_levels: [1.0; 3],
+        });
+        let palette = Palette::default();
+        let mut terminal = Terminal::new(TestBackend::new(160, 60)).unwrap();
+        let amber_pixels = |buffer: &ratatui::buffer::Buffer| {
+            let rows: Vec<_> = buffer.content.chunks(160).collect();
+            let chart_start = rows
+                .iter()
+                .position(|row| {
+                    row.iter()
+                        .map(|cell| cell.symbol())
+                        .collect::<String>()
+                        .contains("BANDWIDTH /")
+                })
+                .unwrap();
+            rows[chart_start..]
+                .iter()
+                .flat_map(|row| row.iter())
+                .filter(|cell| cell.symbol() == "█" && cell.fg == palette.yellow)
+                .count()
+        };
+        terminal.draw(|frame| draw(frame, &app, &palette)).unwrap();
+        assert!(amber_pixels(terminal.backend().buffer()) > 0);
+        app.metrics.scales[0] = 10000.0;
+        terminal.draw(|frame| draw(frame, &app, &palette)).unwrap();
+        let compressed = amber_pixels(terminal.backend().buffer());
+        assert!(compressed > 0);
+        app.show_upload = true;
+        terminal.draw(|frame| draw(frame, &app, &palette)).unwrap();
+        assert_eq!(amber_pixels(terminal.backend().buffer()), compressed);
+        app.apply(Err("RPC unavailable".into()));
+        terminal.draw(|frame| draw(frame, &app, &palette)).unwrap();
+        assert_eq!(amber_pixels(terminal.backend().buffer()), compressed);
+        assert!(render(&app, 160, 60).contains("RECONNECTING · HISTORY HELD"));
+    }
+
+    #[test]
     fn time_axis_has_real_gaps_and_uses_time_weighted_bins() {
         let end = Utc::now();
         let mut app = App::default();
@@ -1759,6 +1844,7 @@ mod tests {
                 upload: Some(value / 2.0),
                 blocks: None,
                 transactions: None,
+                color_levels: [1.0; 3],
             });
         }
         let plot = time_plot(&app, 12).unwrap();
@@ -1847,6 +1933,7 @@ mod tests {
                 upload: Some(10.0),
                 blocks: Some(1.0),
                 transactions: Some(5.0),
+                color_levels: [1.0; 3],
             });
         }
         app.metrics.down = Some(2000.0);
