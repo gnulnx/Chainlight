@@ -44,7 +44,7 @@ pub fn draw(frame: &mut Frame, app: &App, palette: &Palette) {
             }),
             Constraint::Length(2),
             Constraint::Min(1),
-            Constraint::Length(if area.height >= 36 { 4 } else { 0 }),
+            Constraint::Length(if area.height >= 36 { 5 } else { 0 }),
             Constraint::Length(if area.width >= 70 { 3 } else { 2 }),
         ])
         .split(inner);
@@ -351,22 +351,17 @@ fn activity(frame: &mut Frame, area: Rect, app: &App, p: &Palette) {
     if area.height == 0 {
         return;
     }
-    let mut lines = vec![Line::from(Span::styled(
-        "NODE ACTIVITY / OBSERVED CHANGES · UTC",
-        Style::default().fg(p.accent).add_modifier(Modifier::BOLD),
-    ))];
+    let card = block("NODE ACTIVITY / OBSERVED CHANGES · UTC", p);
+    let inner = card.inner(area);
+    frame.render_widget(card, area);
+    let mut lines = Vec::new();
     if app.events.is_empty() {
         lines.push(Line::from(Span::styled(
             "Waiting for a node observation…",
             Style::default().fg(p.muted),
         )));
     }
-    for event in app
-        .events
-        .iter()
-        .rev()
-        .take(usize::from(area.height.saturating_sub(1)))
-    {
+    for event in app.events.iter().rev().take(usize::from(inner.height)) {
         lines.push(Line::from(vec![
             Span::styled(
                 format!("{}  ", event.at.format("%H:%M:%S")),
@@ -383,7 +378,7 @@ fn activity(frame: &mut Frame, area: Rect, app: &App, p: &Palette) {
             Span::raw(safe(&event.detail)),
         ]));
     }
-    frame.render_widget(Paragraph::new(lines), area);
+    frame.render_widget(Paragraph::new(lines), inner);
 }
 
 fn status(app: &App) -> &'static str {
