@@ -10,7 +10,7 @@ depends=('bash' 'glibc' 'gcc-libs')
 optdepends=('bitcoin-core: local Bitcoin node' 'omarchy: themed desktop launcher')
 makedepends=('rust')
 source=("$pkgname-$pkgver.tar.gz")
-sha256sums=('92ae4a05cec37792add5ad2a348c79b5f920f86f3f34e36810e7b4f75fa7e151')
+sha256sums=('bd39132f64551afdfee9922d0c0c82fc2de7491d9f04e6e1ae7622ceb2c2e898')
 
 build() {
   cd "$srcdir/$pkgname-$pkgver"

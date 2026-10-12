@@ -1242,10 +1242,17 @@ fn pixel_histogram(frame: &mut Frame, area: Rect, app: &App, p: &Palette) {
         };
         let ratio = if scale == 0.0 { 0.0 } else { value / scale };
         let filled = (ratio * f64::from(rows)).ceil() as u16;
-        let color = p.accent;
         let x = area.x + scale_width + column as u16 * column_step;
         for row in 0..filled.min(rows) {
             let y = graph_y + chart_height - 1 - row * row_step;
+            let level = f64::from(row + 1) / f64::from(rows);
+            let color = if level <= 0.35 {
+                p.accent
+            } else if level <= 0.70 {
+                p.green
+            } else {
+                p.yellow
+            };
             frame.render_widget(
                 Paragraph::new("█".repeat(usize::from(pixel_width)))
                     .style(Style::default().fg(color)),
@@ -1266,7 +1273,7 @@ fn pixel_histogram(frame: &mut Frame, area: Rect, app: &App, p: &Palette) {
             let level = (up / scale * f64::from(rows)).ceil() as u16;
             let y = graph_y + chart_height - 1 - level.saturating_sub(1).min(rows - 1) * row_step;
             frame.render_widget(
-                Paragraph::new("◆").style(Style::default().fg(p.green)),
+                Paragraph::new("◆").style(Style::default().fg(p.foreground)),
                 Rect::new(x, y, 1, 1),
             );
         }
@@ -1311,24 +1318,28 @@ fn pixel_histogram(frame: &mut Frame, area: Rect, app: &App, p: &Palette) {
             1,
         ),
     );
+    let label = if area.width < 85 {
+        "Color = rate: "
+    } else if app.graph == GraphKind::Bandwidth {
+        "Color = download rate: "
+    } else {
+        "Color = checking rate: "
+    };
+    let mut legend = vec![
+        Span::raw(label),
+        Span::styled("■", Style::default().fg(p.accent)),
+        Span::raw(" low  "),
+        Span::styled("■", Style::default().fg(p.green)),
+        Span::raw(" medium  "),
+        Span::styled("■", Style::default().fg(p.yellow)),
+        Span::raw(" high · chart scale"),
+    ];
+    if upload {
+        legend.push(Span::styled("  ◆", Style::default().fg(p.foreground)));
+        legend.push(Span::raw(" upload"));
+    }
     frame.render_widget(
-        Paragraph::new(if upload {
-            format!(
-                "Scale {} · ■ download / ◆ upload · u: Hide upload",
-                graph_rate(app.graph, scale)
-            )
-        } else {
-            format!(
-                "Scale {} · ■ {}",
-                graph_rate(app.graph, scale),
-                if app.graph == GraphKind::Bandwidth {
-                    "download"
-                } else {
-                    "checking rate"
-                }
-            )
-        })
-        .style(Style::default().fg(p.foreground)),
+        Paragraph::new(Line::from(legend)).style(Style::default().fg(p.foreground)),
         Rect::new(area.x, graph_y + chart_height + 1, area.width, 1),
     );
     let state = if app.stale() {
@@ -1562,7 +1573,8 @@ fn help(frame: &mut Frame, area: Rect, p: &Palette) {
         "",
         "READING THE CHART",
         "Each column averages measured activity in its time interval; the window spans 120 seconds.",
-        "Height shows volume. Solid pixels show download/checking activity, not a health verdict.",
+        "Blue/green/amber pixels show low/medium/high rate relative to the chart scale, not health.",
+        "The color bands divide the scale at 35% and 70%. Upload uses contrasting diamond markers.",
         "Diamond markers show upload on the same scale. The labeled upper bound grows immediately",
         "for new peaks and falls gradually (about a 30-second decay) when older peaks expire.",
         "Dots mean measured zero; empty intervals mean no observation. Held history is labeled.",

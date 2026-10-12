@@ -76,8 +76,10 @@ when Core lacks enough observations.
 
 The pixel activity chart spans 120 seconds with UTC time labels. Each column
 is a time-weighted average of measured rates; its height and color use the
-visible chart scale. A single hue denotes download/checking volume; upload uses
-diamond markers in a second hue on the same scale. The vertical scale is labeled,
+visible chart scale. Blue, green, and amber bands show low, medium, and high
+rates, divided at 35% and 70% of the scale; they do not indicate node health.
+A colored legend explains the bands. Upload uses contrasting diamond markers
+on the same scale. The vertical scale is labeled,
 expands immediately for new peaks, and falls gradually with a 30-second decay
 after old peaks expire. The current rate and last-two-minute peak are explicit.
 Blank intervals mean no sample; dots mean measured zero (explained in Help).
