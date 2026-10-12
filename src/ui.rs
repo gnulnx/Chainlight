@@ -36,7 +36,11 @@ pub fn draw(frame: &mut Frame, app: &App, palette: &Palette) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),
+            Constraint::Length(if area.width >= 100 && area.height >= 32 {
+                8
+            } else {
+                3
+            }),
             Constraint::Length(2),
             Constraint::Min(1),
             Constraint::Length(2),
@@ -54,38 +58,42 @@ pub fn draw(frame: &mut Frame, app: &App, palette: &Palette) {
     } else {
         palette.yellow
     };
-    frame.render_widget(
-        Paragraph::new(vec![
-            Line::from(vec![
-                Span::styled(
-                    "₿  CHAINLIGHT",
-                    Style::default()
-                        .fg(palette.accent)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    if area.width > 65 {
-                        "   Your chain. Your verification."
-                    } else {
-                        "   BITCOIN NODE"
-                    },
-                    Style::default().fg(palette.muted),
-                ),
-            ]),
-            Line::from(vec![
-                Span::styled(format!("● {status}"), Style::default().fg(status_color)),
-                Span::styled(
-                    app.current
-                        .as_ref()
-                        .map(|s| format!("   {}", safe(&s.chain.chain)))
-                        .unwrap_or_default(),
-                    Style::default().fg(palette.muted),
-                ),
-            ]),
-        ])
-        .style(base),
-        chunks[0],
-    );
+    if area.width >= 100 && area.height >= 32 {
+        pixel_header(frame, chunks[0], app, palette, status_color);
+    } else {
+        frame.render_widget(
+            Paragraph::new(vec![
+                Line::from(vec![
+                    Span::styled(
+                        "₿  CHAINLIGHT",
+                        Style::default()
+                            .fg(palette.accent)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        if area.width > 65 {
+                            "   Your chain. Your verification."
+                        } else {
+                            "   BITCOIN NODE"
+                        },
+                        Style::default().fg(palette.muted),
+                    ),
+                ]),
+                Line::from(vec![
+                    Span::styled(format!("● {status}"), Style::default().fg(status_color)),
+                    Span::styled(
+                        app.current
+                            .as_ref()
+                            .map(|s| format!("   {}", safe(&s.chain.chain)))
+                            .unwrap_or_default(),
+                        Style::default().fg(palette.muted),
+                    ),
+                ]),
+            ])
+            .style(base),
+            chunks[0],
+        );
+    }
     frame.render_widget(
         Tabs::new(["1 Overview", "2 Peers", "3 Storage"])
             .select(app.tab.min(2))
@@ -178,6 +186,118 @@ pub fn draw(frame: &mut Frame, app: &App, palette: &Palette) {
         chunks[3],
     );
 }
+// Five-row bitmap letters use ordinary terminal cells, including over SSH.
+fn pixel_header(
+    frame: &mut Frame,
+    area: Rect,
+    app: &App,
+    p: &Palette,
+    status_color: ratatui::style::Color,
+) {
+    let glyphs = [
+        ["01110", "10000", "10000", "10000", "01110"], // C
+        ["10001", "10001", "11111", "10001", "10001"], // H
+        ["01110", "10001", "11111", "10001", "10001"], // A
+        ["111", "010", "010", "010", "111"],           // I
+        ["10001", "11001", "10101", "10011", "10001"], // N
+        ["10000", "10000", "10000", "10000", "11111"], // L
+        ["111", "010", "010", "010", "111"],           // I
+        ["01111", "10000", "10111", "10001", "01110"], // G
+        ["10001", "10001", "11111", "10001", "10001"], // H
+        ["11111", "00100", "00100", "00100", "00100"], // T
+    ];
+    let scale = if area.width >= 120 { 2 } else { 1 };
+    let mut lines = Vec::new();
+    for row in 0..5 {
+        let mut spans = Vec::new();
+        for (i, glyph) in glyphs.iter().enumerate() {
+            let pixels = glyph[row]
+                .chars()
+                .map(|bit| {
+                    if bit == '1' {
+                        "█".repeat(scale)
+                    } else {
+                        " ".repeat(scale)
+                    }
+                })
+                .collect::<String>();
+            let color = if i < 5 {
+                p.accent
+            } else if i < 8 {
+                p.green
+            } else {
+                p.yellow
+            };
+            spans.push(Span::styled(pixels, Style::default().fg(color)));
+            spans.push(Span::raw(" "));
+        }
+        lines.push(Line::from(spans));
+    }
+    lines.push(Line::from(Span::styled(
+        "CHAINLIGHT  /  YOUR CHAIN. YOUR VERIFICATION.",
+        Style::default().fg(p.muted),
+    )));
+    lines.push(Line::from(vec![
+        Span::styled(
+            format!("◆ {}", status(app)),
+            Style::default().fg(status_color),
+        ),
+        Span::styled(
+            app.current
+                .as_ref()
+                .map(|s| format!("   / {}", safe(&s.chain.chain)))
+                .unwrap_or_default(),
+            Style::default().fg(p.muted),
+        ),
+    ]));
+    frame.render_widget(Paragraph::new(lines), area);
+}
+
+fn voxel_work(frame: &mut Frame, area: Rect, s: &Snapshot, p: &Palette) {
+    // Every cube is one percent of Core's estimated work, not one block.
+    let progress = s.chain.verificationprogress;
+    if !progress.is_finite() {
+        return;
+    }
+    let filled = (progress.clamp(0.0, 1.0) * 100.0).floor() as usize;
+    let rows = if area.height >= 24 { 10 } else { 5 };
+    let columns = 100 / rows;
+    if usize::from(area.width) < columns * 3 {
+        return;
+    }
+    let mut lines = vec![Line::from(Span::styled(
+        "VERIFICATION / WORK GRID",
+        Style::default().fg(p.accent),
+    ))];
+    lines.push(Line::from(""));
+    for row in 0..rows {
+        for layer in 0..2 {
+            let spans = (0..columns)
+                .map(|col| {
+                    let done = row * columns + col < filled;
+                    let cell = match (done, layer) {
+                        (true, 0) => "▄█ ",
+                        (true, _) => "▀▓ ",
+                        (false, 0) => "·  ",
+                        _ => "   ",
+                    };
+                    Span::styled(
+                        cell,
+                        Style::default().fg(if done { p.green } else { p.muted }),
+                    )
+                })
+                .collect::<Vec<_>>();
+            lines.push(Line::from(spans));
+        }
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "1 cube = 1% estimated work",
+        Style::default().fg(p.muted),
+    )));
+    frame.render_widget(Paragraph::new(lines), area);
+}
+
 fn status(app: &App) -> &'static str {
     if app.error.is_some() {
         return if app.current.is_some() {
@@ -286,8 +406,16 @@ fn overview(frame: &mut Frame, area: Rect, app: &App, s: &Snapshot, p: &Palette)
                     p,
                 ),
             ]),
-            inner,
+            Rect::new(inner.x, inner.y, inner.width, inner.height.min(5)),
         );
+        if inner.height >= 16 && inner.width >= 36 {
+            voxel_work(
+                frame,
+                Rect::new(inner.x, inner.y + 7, inner.width, inner.height - 7),
+                s,
+                p,
+            );
+        }
     } else {
         network(frame, rows[1], app, s, p)
     }
@@ -423,7 +551,12 @@ fn network(frame: &mut Frame, area: Rect, app: &App, s: &Snapshot, p: &Palette) 
     ];
     frame.render_widget(Paragraph::new(text), inner);
     if inner.height >= 4 {
-        let graph = Rect::new(inner.x, inner.y + 3, inner.width, inner.height - 3);
+        let graph = Rect::new(
+            inner.x,
+            inner.y + 3,
+            inner.width,
+            (inner.height - 3).min(10),
+        );
         if app.error.is_some() || s.traffic.is_none() {
             frame.render_widget(
                 Paragraph::new("Network activity unavailable").style(Style::default().fg(p.muted)),
