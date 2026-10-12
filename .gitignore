@@ -1,0 +1,18 @@
+/build/
+/target/
+/bitcoin-node
+/chainlight
+*.tar.gz
+*.pkg.tar.*
+__pycache__/
+
+# Local deployment evidence; never part of the public source.
+/ops/runtime-verification.json
+/ops/release-verification.json
+/ops/signature-verification.log
+/ops/SHA256SUMS*
+/ops/install-core.sh
+/docs/VALIDATION.md
+/ops/*
+!/ops/bitcoin.conf
+!/ops/bitcoin-node.service

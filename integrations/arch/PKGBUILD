@@ -1,0 +1,32 @@
+# Local source package: assemble chainlight-0.2.0.tar.gz as documented.
+# No upstream release location is claimed before a public project exists.
+pkgname=chainlight
+pkgver=0.2.0
+pkgrel=1
+pkgdesc='Portable terminal dashboard for Bitcoin Core with optional Omarchy integration'
+arch=('x86_64' 'aarch64')
+license=('MIT')
+depends=('bash' 'glibc' 'gcc-libs')
+optdepends=('bitcoin-core: local Bitcoin node' 'omarchy: themed desktop launcher')
+makedepends=('rust')
+source=("$pkgname-$pkgver.tar.gz")
+sha256sums=('fc91e939713a477858a72be59f4c2ac070fbe35c908359b08df7a0143567c526')
+
+build() {
+  cd "$srcdir/$pkgname-$pkgver"
+  cargo build --locked --release
+}
+
+package() {
+  cd "$srcdir/$pkgname-$pkgver"
+  install -Dm755 target/release/chainlight "$pkgdir/usr/bin/chainlight"
+  install -Dm755 integrations/omarchy/chainlight-omarchy "$pkgdir/usr/bin/chainlight-omarchy"
+  install -Dm644 integrations/desktop/chainlight.desktop "$pkgdir/usr/share/applications/chainlight.desktop"
+  install -Dm644 assets/chainlight.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/chainlight.svg"
+  for size in 16 32 48 64 128 256; do
+    install -Dm644 "assets/chainlight-$size.png" "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/chainlight.png"
+  done
+  install -Dm644 docs/INSTALL.md "$pkgdir/usr/share/doc/$pkgname/INSTALL.md"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 docs/NODE.md "$pkgdir/usr/share/doc/$pkgname/NODE.md"
+}

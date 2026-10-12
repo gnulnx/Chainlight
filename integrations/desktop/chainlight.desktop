@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Chainlight
+Comment=Monitor Bitcoin Core synchronization and node health
+Exec=chainlight
+Terminal=true
+Icon=chainlight
+Categories=System;Monitor;
+Keywords=Bitcoin;Node;Blockchain;
+StartupNotify=false

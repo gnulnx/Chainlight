@@ -1,0 +1,18 @@
+[Unit]
+Description=Bitcoin Core mainnet node
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/bitcoind -datadir=%h/.bitcoin
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=300
+KillSignal=SIGTERM
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target
